@@ -1,0 +1,14 @@
+{
+  "name": "stickmen-server",
+  "version": "1.0.0",
+  "description": "Serveur physique multijoueur Stickmen",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.13.0",
+    "matter-js": "^0.19.0"
+  }
+}
