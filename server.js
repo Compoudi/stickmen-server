@@ -1,3 +1,4 @@
+// 🧩 Stickmen Multiplayer Server avec Matter.js
 const express = require("express");
 const { WebSocketServer } = require("ws");
 const http = require("http");
@@ -9,7 +10,7 @@ const wss = new WebSocketServer({ server });
 app.use(express.static("public"));
 
 // Chaque partie = un monde physique indépendant
-const games = []; // [{ id, players: { ws, id, color }, engine, world, interval }]
+const games = []; // [{ id, players, engine, world, interval }]
 
 // Trouve ou crée une partie disponible
 function findOrCreateGame() {
@@ -32,52 +33,57 @@ function findOrCreateGame() {
   return game;
 }
 
+// 🧍‍♂️ Crée un stickman complet (mains + pieds rectangulaires, jambes allongées)
 function createStickman(world, x, y) {
   const group = Matter.Body.nextGroup(true);
+
   const parts = {
     head: Matter.Bodies.circle(x, y, 15, { collisionFilter: { group } }),
     chest: Matter.Bodies.rectangle(x, y + 40, 25, 40, { collisionFilter: { group } }),
-    pelvis: Matter.Bodies.rectangle(x, y + 90, 25, 20, { collisionFilter: { group } }),
-    armL: Matter.Bodies.rectangle(x - 25, y + 40, 30, 8, { collisionFilter: { group } }),
-    armR: Matter.Bodies.rectangle(x + 25, y + 40, 30, 8, { collisionFilter: { group } }),
-    legL: Matter.Bodies.rectangle(x - 10, y + 130, 10, 35, { collisionFilter: { group } }),
-    legR: Matter.Bodies.rectangle(x + 10, y + 130, 10, 35, { collisionFilter: { group } }),
+    pelvis: Matter.Bodies.rectangle(x, y + 100, 25, 25, { collisionFilter: { group } }),
 
-    // 🖐️ Mains
-    handL: Matter.Bodies.circle(x - 55, y + 40, 8, { collisionFilter: { group } }),
-    handR: Matter.Bodies.circle(x + 55, y + 40, 8, { collisionFilter: { group } }),
+    // 🦾 Bras
+    armL: Matter.Bodies.rectangle(x - 35, y + 40, 40, 8, { collisionFilter: { group } }),
+    armR: Matter.Bodies.rectangle(x + 35, y + 40, 40, 8, { collisionFilter: { group } }),
 
-    // 👣 Pieds
-    footL: Matter.Bodies.circle(x - 15, y + 165, 10, { collisionFilter: { group } }),
-    footR: Matter.Bodies.circle(x + 15, y + 165, 10, { collisionFilter: { group } })
+    // 🖐️ Mains (rectangles)
+    handL: Matter.Bodies.rectangle(x - 65, y + 40, 20, 8, { collisionFilter: { group } }),
+    handR: Matter.Bodies.rectangle(x + 65, y + 40, 20, 8, { collisionFilter: { group } }),
+
+    // 🦵 Jambes (plus longues)
+    legL: Matter.Bodies.rectangle(x - 10, y + 160, 12, 60, { collisionFilter: { group } }),
+    legR: Matter.Bodies.rectangle(x + 10, y + 160, 12, 60, { collisionFilter: { group } }),
+
+    // 👣 Pieds (rectangles)
+    footL: Matter.Bodies.rectangle(x - 15, y + 205, 25, 8, { collisionFilter: { group } }),
+    footR: Matter.Bodies.rectangle(x + 15, y + 205, 25, 8, { collisionFilter: { group } })
   };
 
   const c = Matter.Constraint.create;
   const constraints = [
+    // Corps principal
     c({ bodyA: parts.head, bodyB: parts.chest, length: 25, stiffness: 0.9 }),
-    c({ bodyA: parts.chest, bodyB: parts.pelvis, length: 40, stiffness: 0.9 }),
-    c({ bodyA: parts.chest, bodyB: parts.armL, length: 30, stiffness: 0.6 }),
-    c({ bodyA: parts.chest, bodyB: parts.armR, length: 30, stiffness: 0.6 }),
-    c({ bodyA: parts.pelvis, bodyB: parts.legL, length: 25, stiffness: 0.6 }),
-    c({ bodyA: parts.pelvis, bodyB: parts.legR, length: 25, stiffness: 0.6 }),
+    c({ bodyA: parts.chest, bodyB: parts.pelvis, length: 50, stiffness: 0.9 }),
 
-    // 🖐️ Mains reliées aux bras
-    c({ bodyA: parts.armL, bodyB: parts.handL, length: 20, stiffness: 0.8 }),
-    c({ bodyA: parts.armR, bodyB: parts.handR, length: 20, stiffness: 0.8 }),
+    // Bras + mains
+    c({ bodyA: parts.chest, bodyB: parts.armL, length: 35, stiffness: 0.6 }),
+    c({ bodyA: parts.chest, bodyB: parts.armR, length: 35, stiffness: 0.6 }),
+    c({ bodyA: parts.armL, bodyB: parts.handL, length: 25, stiffness: 0.8 }),
+    c({ bodyA: parts.armR, bodyB: parts.handR, length: 25, stiffness: 0.8 }),
 
-    // 👣 Pieds reliés aux jambes
-    c({ bodyA: parts.legL, bodyB: parts.footL, length: 15, stiffness: 0.8 }),
-    c({ bodyA: parts.legR, bodyB: parts.footR, length: 15, stiffness: 0.8 })
+    // Jambes + pieds
+    c({ bodyA: parts.pelvis, bodyB: parts.legL, length: 45, stiffness: 0.7 }),
+    c({ bodyA: parts.pelvis, bodyB: parts.legR, length: 45, stiffness: 0.7 }),
+    c({ bodyA: parts.legL, bodyB: parts.footL, length: 25, stiffness: 0.8 }),
+    c({ bodyA: parts.legR, bodyB: parts.footR, length: 25, stiffness: 0.8 })
   ];
 
   Matter.World.add(world, [...Object.values(parts), ...constraints]);
   return { stickmanParts: parts, head: parts.head };
 }
 
-
-// Gestion WebSocket
+// 🧠 Gestion WebSocket
 wss.on("connection", (ws) => {
-  // Trouver ou créer une partie libre
   const game = findOrCreateGame();
   const id = Date.now().toString();
   const color = Object.keys(game.players).length === 0 ? "black" : "red";
@@ -89,27 +95,28 @@ wss.on("connection", (ws) => {
   ws.send(JSON.stringify({ type: "init", id, color }));
 
   // Lance la simulation si c’est le 1er joueur
-  if (!game.interval) {
-    game.interval = setInterval(() => updateGame(game), 1000 / 60);
-  }
+  if (!game.interval) game.interval = setInterval(() => updateGame(game), 1000 / 60);
 
   ws.on("message", (msg) => {
-    const data = JSON.parse(msg);
-    if (data.type === "pointerMove") {
-      game.players[id].pointer = data.pointer;
+    try {
+      const data = JSON.parse(msg);
+      if (data.type === "pointerMove") {
+        game.players[id].pointer = data.pointer;
+      }
+    } catch (e) {
+      console.error("Invalid WS message:", e);
     }
   });
 
-  ws.on("close", () => {
-    removePlayer(game, id);
-  });
+  ws.on("close", () => removePlayer(game, id));
 });
 
+// 🔄 Moteur de jeu
 function updateGame(game) {
   const { engine, players } = game;
   Matter.Engine.update(engine, 1000 / 60);
 
-  // Déplacer les têtes selon la souris
+  // Déplacer les têtes vers la souris
   for (const [id, p] of Object.entries(players)) {
     const dx = p.pointer.x - p.head.position.x;
     const dy = p.pointer.y - p.head.position.y;
@@ -124,7 +131,7 @@ function updateGame(game) {
       snapshot[id].parts[name] = { x: body.position.x, y: body.position.y };
   }
 
-  // Broadcast aux joueurs de cette partie seulement
+  // Broadcast uniquement aux joueurs de cette partie
   const payload = JSON.stringify({ type: "state", players: snapshot });
   for (const p of Object.values(players)) {
     try {
@@ -133,13 +140,14 @@ function updateGame(game) {
   }
 }
 
+// 🚪 Supprime un joueur et nettoie la partie
 function removePlayer(game, id) {
   const p = game.players[id];
   if (!p) return;
   for (const b of Object.values(p.stickmanParts)) Matter.World.remove(game.world, b);
   delete game.players[id];
 
-  // Si plus personne → stoppe le moteur et supprime la partie
+  // Si plus personne → supprime la partie
   if (Object.keys(game.players).length === 0) {
     clearInterval(game.interval);
     const index = games.indexOf(game);
@@ -147,6 +155,6 @@ function removePlayer(game, id) {
   }
 }
 
-const PORT = 3000;
-server.listen(PORT, () => console.log(`🧩 Serveur multi-parties sur http://localhost:${PORT}`));
-
+// 🚀 Lancement serveur
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`🧍 Serveur Stickmen amélioré sur http://localhost:${PORT}`));
