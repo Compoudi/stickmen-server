@@ -41,7 +41,15 @@ function createStickman(world, x, y) {
     armL: Matter.Bodies.rectangle(x - 25, y + 40, 30, 8, { collisionFilter: { group } }),
     armR: Matter.Bodies.rectangle(x + 25, y + 40, 30, 8, { collisionFilter: { group } }),
     legL: Matter.Bodies.rectangle(x - 10, y + 130, 10, 35, { collisionFilter: { group } }),
-    legR: Matter.Bodies.rectangle(x + 10, y + 130, 10, 35, { collisionFilter: { group } })
+    legR: Matter.Bodies.rectangle(x + 10, y + 130, 10, 35, { collisionFilter: { group } }),
+
+    // 🖐️ Mains
+    handL: Matter.Bodies.circle(x - 55, y + 40, 8, { collisionFilter: { group } }),
+    handR: Matter.Bodies.circle(x + 55, y + 40, 8, { collisionFilter: { group } }),
+
+    // 👣 Pieds
+    footL: Matter.Bodies.circle(x - 15, y + 165, 10, { collisionFilter: { group } }),
+    footR: Matter.Bodies.circle(x + 15, y + 165, 10, { collisionFilter: { group } })
   };
 
   const c = Matter.Constraint.create;
@@ -51,12 +59,21 @@ function createStickman(world, x, y) {
     c({ bodyA: parts.chest, bodyB: parts.armL, length: 30, stiffness: 0.6 }),
     c({ bodyA: parts.chest, bodyB: parts.armR, length: 30, stiffness: 0.6 }),
     c({ bodyA: parts.pelvis, bodyB: parts.legL, length: 25, stiffness: 0.6 }),
-    c({ bodyA: parts.pelvis, bodyB: parts.legR, length: 25, stiffness: 0.6 })
+    c({ bodyA: parts.pelvis, bodyB: parts.legR, length: 25, stiffness: 0.6 }),
+
+    // 🖐️ Mains reliées aux bras
+    c({ bodyA: parts.armL, bodyB: parts.handL, length: 20, stiffness: 0.8 }),
+    c({ bodyA: parts.armR, bodyB: parts.handR, length: 20, stiffness: 0.8 }),
+
+    // 👣 Pieds reliés aux jambes
+    c({ bodyA: parts.legL, bodyB: parts.footL, length: 15, stiffness: 0.8 }),
+    c({ bodyA: parts.legR, bodyB: parts.footR, length: 15, stiffness: 0.8 })
   ];
 
   Matter.World.add(world, [...Object.values(parts), ...constraints]);
   return { stickmanParts: parts, head: parts.head };
 }
+
 
 // Gestion WebSocket
 wss.on("connection", (ws) => {
@@ -132,3 +149,4 @@ function removePlayer(game, id) {
 
 const PORT = 3000;
 server.listen(PORT, () => console.log(`🧩 Serveur multi-parties sur http://localhost:${PORT}`));
+
