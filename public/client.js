@@ -47,17 +47,32 @@ class StickmenScene extends Phaser.Scene {
     const g = this.graphics;
     g.lineStyle(3, color);
     const L = (a, b) => { g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); };
+
     g.beginPath();
+    // Corps
     L(b.head, b.chest);
     L(b.chest, b.pelvis);
+    // Bras
     L(b.chest, b.armL);
     L(b.chest, b.armR);
+    if (b.armL && b.handL) L(b.armL, b.handL);
+    if (b.armR && b.handR) L(b.armR, b.handR);
+    // Jambes
     L(b.pelvis, b.legL);
     L(b.pelvis, b.legR);
+    if (b.legL && b.footL) L(b.legL, b.footL);
+    if (b.legR && b.footR) L(b.legR, b.footR);
+
     g.strokePath();
-    g.strokeCircle(b.head.x, b.head.y, 10);
+
+    // Cercles des articulations
+    g.strokeCircle(b.head.x, b.head.y, 10); // tête
+    if (b.handL) g.strokeCircle(b.handL.x, b.handL.y, 5);
+    if (b.handR) g.strokeCircle(b.handR.x, b.handR.y, 5);
+    if (b.footL) g.strokeCircle(b.footL.x, b.footL.y, 6);
+    if (b.footR) g.strokeCircle(b.footR.x, b.footR.y, 6);
   }
-}
+
 
 new Phaser.Game({
   type: Phaser.AUTO,
