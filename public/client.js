@@ -15,11 +15,18 @@ let id, color;
 let players = {};
 let pointer = { x: 400, y: 300 };
 let currentScene = null;
+let gameEnded = false; // 🔒 Empêche de rejoindre une room terminée
 
-// === 🔗 Initialisation unique du WebSocket ===
+// === 🔗 Initialisation WebSocket ===
 function initWebSocket(scene) {
+  if (gameEnded) {
+    console.warn("🚫 Partie terminée — création d’une nouvelle partie requise.");
+    alert("Cette partie est terminée. Relancez une nouvelle partie depuis le menu.");
+    return;
+  }
+
   if (wsConnected && ws && ws.readyState === WebSocket.OPEN) {
-    console.warn("⚠️ WebSocket déjà connecté, double connexion évitée.");
+    console.warn("⚠️ WebSocket déjà connecté.");
     return;
   }
 
@@ -28,7 +35,6 @@ function initWebSocket(scene) {
   }
 
   ws = new WebSocket("wss://stickmen-server.onrender.com");
-  // ws = new WebSocket("ws://localhost:3000");
   wsConnected = true;
 
   ws.onopen = () => console.log("🌐 WebSocket connecté");
@@ -60,6 +66,16 @@ function initWebSocket(scene) {
 
     if (data.type === "goToMenu") {
       console.log("📩 Retour au menu principal reçu !");
+      gameEnded = true; // 🚫 Room terminée
+      if (scene.scene.isActive("StickmenScene")) {
+        scene.scene.stop("StickmenScene");
+        scene.scene.start("MenuScene");
+      }
+    }
+
+    if (data.type === "roomClosed") {
+      alert("⚠️ La partie que vous essayez de rejoindre est terminée.");
+      gameEnded = true;
       if (scene.scene.isActive("StickmenScene")) {
         scene.scene.stop("StickmenScene");
         scene.scene.start("MenuScene");
@@ -84,6 +100,12 @@ class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.input.keyboard.on("keydown-SPACE", () => {
+      if (gameEnded) {
+        console.warn("🚫 Partie précédente terminée, création d’une nouvelle partie requise.");
+        alert("Cette partie est terminée. Rechargez la page pour recommencer !");
+        return;
+      }
+
       console.log("🎮 Nouvelle partie lancée...");
       this.scene.start("StickmenScene");
     });
@@ -122,13 +144,12 @@ class StickmenScene extends Phaser.Scene {
     }
   }
 
-  // === 🚪 Bouton EXIT amélioré ===
   showExitButton() {
     if (document.getElementById("exit-btn")) return;
 
     const btn = document.createElement("button");
     btn.id = "exit-btn";
-    btn.innerText = "🚪 Exit";
+    btn.innerText = "🚪 Quitter";
 
     Object.assign(btn.style, {
       position: "fixed",
@@ -150,38 +171,31 @@ class StickmenScene extends Phaser.Scene {
     btn.onclick = () => {
       console.log("🚪 Exit → retour au menu principal");
 
-      // 🔒 Fermer proprement le WebSocket
       if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "exitGame" })); // 🔥 informer le serveur
         ws.close(1000, "Exit to menu");
       }
+
       ws = null;
       wsConnected = false;
+      gameEnded = true;
 
-      // 🧹 Nettoyage des données
       players = {};
       id = null;
       color = null;
       pointer = { x: 400, y: 300 };
 
-      // 🚀 Retour vers le menu principal
       if (this.scene.isActive("StickmenScene")) {
         this.scene.stop("StickmenScene");
         this.scene.start("MenuScene");
       }
 
-      // Supprimer le bouton
       btn.remove();
-
-      // 💣 Optionnel : destruction complète du jeu (reset total)
-      // this.game.destroy(true);
-      // location.reload();
     };
 
     document.body.appendChild(btn);
-    console.log("✅ Bouton Exit ajouté");
   }
 
-  // === 🎨 Dessin du stickman ===
   drawStickman(player, color) {
     const b = player.parts;
     const g = this.graphics;
@@ -237,7 +251,6 @@ class StickmenScene extends Phaser.Scene {
   }
 }
 
-// === 🚀 Lancement du jeu Phaser ===
 new Phaser.Game({
   type: Phaser.AUTO,
   width: 800,
@@ -245,4 +258,5 @@ new Phaser.Game({
   backgroundColor: "#ffffff",
   scene: [MenuScene, StickmenScene],
 });
+
 
