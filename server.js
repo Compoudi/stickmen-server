@@ -1,9 +1,9 @@
-// === 🧠 Serveur Stickmen Physique Stable (Matter.js) ===
+// === 🧠 Serveur Stickmen Physique Ultra Stable (vitesse x0.1) ===
 import { WebSocketServer } from "ws";
 import Matter from "matter-js";
 
 const wss = new WebSocketServer({ port: 3000 });
-console.log("✅ Serveur Stickmen Physique STABLE lancé sur ws://localhost:3000");
+console.log("✅ Serveur Stickmen Physique LENTE lancé sur ws://localhost:3000");
 
 let rooms = {};
 
@@ -12,8 +12,8 @@ function createRoom() {
   const engine = Matter.Engine.create();
   const world = engine.world;
 
-  // 💡 Gravité plus douce
-  world.gravity.y = 0.5;
+  // 🌍 Gravité adoucie (10× plus lente)
+  world.gravity.y = 0.05;
 
   // Sol
   const ground = Matter.Bodies.rectangle(400, 580, 800, 40, {
@@ -47,14 +47,14 @@ function createStickman(x, y, color, world) {
   const bodies = [head, chest, pelvis, armL, armR, legL, legR];
   Matter.World.add(world, bodies);
 
-  // 🔩 Contraintes plus souples pour éviter les secousses
+  // 🔩 Contraintes assouplies pour éviter la rigidité
   const constraints = [
-    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 28, stiffness: 0.3 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 28, stiffness: 0.3 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: armL, length: 20, stiffness: 0.25 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: armR, length: 20, stiffness: 0.25 }),
-    Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 25, stiffness: 0.25 }),
-    Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 25, stiffness: 0.25 }),
+    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 28, stiffness: 0.25 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 28, stiffness: 0.25 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: armL, length: 20, stiffness: 0.2 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: armR, length: 20, stiffness: 0.2 }),
+    Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 25, stiffness: 0.2 }),
+    Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 25, stiffness: 0.2 }),
   ];
   Matter.World.add(world, constraints);
 
@@ -84,7 +84,7 @@ function serializeStickman(s) {
   };
 }
 
-// ⚡ Simulation à cadence stable (30 fps serveur)
+// ⚡ Simulation à cadence fixe (serveur = 60Hz moteur, 30Hz envoi)
 setInterval(() => {
   for (const id in rooms) {
     const room = rooms[id];
@@ -130,8 +130,17 @@ wss.on("connection", (ws) => {
       const head = player.stickman.bodies.head;
       const dx = data.pointer.x - head.position.x;
       const dy = data.pointer.y - head.position.y;
-      const force = { x: dx * 0.00002, y: dy * 0.00002 }; // 💫 force adoucie
+
+      // 💫 Force adoucie (10× plus lente)
+      const force = { x: dx * 0.000002, y: dy * 0.000002 };
       Matter.Body.applyForce(head, head.position, force);
+
+      // 🚫 Limite la vitesse maximale pour éviter les envolées
+      const maxVel = 2;
+      if (head.velocity.x > maxVel) head.velocity.x = maxVel;
+      if (head.velocity.x < -maxVel) head.velocity.x = -maxVel;
+      if (head.velocity.y > maxVel) head.velocity.y = maxVel;
+      if (head.velocity.y < -maxVel) head.velocity.y = -maxVel;
     }
 
     if (data.type === "exitGame") {
