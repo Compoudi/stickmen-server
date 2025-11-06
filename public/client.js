@@ -1,11 +1,16 @@
+// === 🧩 Initialisation sûre du SDK CrazyGames (désactivé en local) ===
 window.addEventListener("load", () => {
-  if (window.CrazyGames) {
-    const crazySDK = window.CrazyGames.CrazySDK.getInstance();
-    crazySDK.init();
-    crazySDK.gameplayStart();
-    console.log("CrazyGames SDK initialisé ✅");
-  } else {
-    console.log("⚠️ CrazyGames SDK non détecté (test local).");
+  try {
+    if (window.CrazyGames && window.CrazyGames.CrazySDK) {
+      const crazySDK = window.CrazyGames.CrazySDK.getInstance();
+      crazySDK.init();
+      crazySDK.gameplayStart();
+      console.log("CrazyGames SDK initialisé ✅");
+    } else {
+      console.log("⚠️ CrazyGames SDK non détecté (mode local activé).");
+    }
+  } catch (e) {
+    console.log("💡 CrazyGames SDK désactivé pour le test local.");
   }
 });
 
@@ -15,7 +20,7 @@ let id, color;
 let players = {};
 let pointer = { x: 400, y: 300 };
 let currentScene = null;
-let gameEnded = false; // 🔒 Empêche de rejoindre une room terminée
+let gameEnded = false;
 
 // === 🔗 Initialisation WebSocket ===
 function initWebSocket(scene) {
@@ -34,10 +39,11 @@ function initWebSocket(scene) {
     try { ws.close(); } catch (e) {}
   }
 
-  ws = new WebSocket("wss://stickmen-server.onrender.com");
+  // 🔄 Connexion locale (modifie ici si tu déploies plus tard)
+  ws = new WebSocket("ws://localhost:3000");
   wsConnected = true;
 
-  ws.onopen = () => console.log("🌐 WebSocket connecté");
+  ws.onopen = () => console.log("🌐 WebSocket connecté ✅");
   ws.onclose = () => {
     console.log("🔌 WebSocket fermé");
     wsConnected = false;
@@ -66,7 +72,7 @@ function initWebSocket(scene) {
 
     if (data.type === "goToMenu") {
       console.log("📩 Retour au menu principal reçu !");
-      gameEnded = true; // 🚫 Room terminée
+      gameEnded = true;
       if (scene.scene.isActive("StickmenScene")) {
         scene.scene.stop("StickmenScene");
         scene.scene.start("MenuScene");
@@ -101,11 +107,10 @@ class MenuScene extends Phaser.Scene {
 
     this.input.keyboard.on("keydown-SPACE", () => {
       if (gameEnded) {
-        console.warn("🚫 Partie précédente terminée, création d’une nouvelle partie requise.");
+        console.warn("🚫 Partie précédente terminée, rechargement nécessaire.");
         alert("Cette partie est terminée. Rechargez la page pour recommencer !");
         return;
       }
-
       console.log("🎮 Nouvelle partie lancée...");
       this.scene.start("StickmenScene");
     });
@@ -172,7 +177,7 @@ class StickmenScene extends Phaser.Scene {
       console.log("🚪 Exit → retour au menu principal");
 
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "exitGame" })); // 🔥 informer le serveur
+        ws.send(JSON.stringify({ type: "exitGame" }));
         ws.close(1000, "Exit to menu");
       }
 
@@ -207,16 +212,12 @@ class StickmenScene extends Phaser.Scene {
     L(b.head, b.chest);
     L(b.chest, b.pelvis);
     L(b.chest, b.armL); L(b.chest, b.armR);
-    L(b.armL, b.handL); L(b.armR, b.handR);
     L(b.pelvis, b.legL); L(b.pelvis, b.legR);
-    L(b.legL, b.footL); L(b.legR, b.footR);
     g.strokePath();
 
     if (b.head) g.strokeCircle(b.head.x, b.head.y, 10);
-    if (b.handL) g.strokeCircle(b.handL.x, b.handL.y, 4);
-    if (b.handR) g.strokeCircle(b.handR.x, b.handR.y, 4);
-    if (b.footL) g.strokeCircle(b.footL.x, b.footL.y, 5);
-    if (b.footR) g.strokeCircle(b.footR.x, b.footR.y, 5);
+    if (b.legL) g.strokeCircle(b.legL.x, b.legL.y, 5);
+    if (b.legR) g.strokeCircle(b.legR.x, b.legR.y, 5);
 
     const hp = player.hp ?? 100;
     const ratio = Phaser.Math.Clamp(hp / 100, 0, 1);
@@ -235,18 +236,6 @@ class StickmenScene extends Phaser.Scene {
       g.fillRect(x, y, barWidth * ratio, barHeight);
       g.lineStyle(1, 0x000000);
       g.strokeRect(x, y, barWidth, barHeight);
-
-      if (!this.hpTexts[player.color]) {
-        this.hpTexts[player.color] = this.add.text(0, 0, "HP: 100", {
-          font: "12px Arial", fill: "#000"
-        }).setDepth(10).setOrigin(0.5);
-      }
-
-      const hpText = this.hpTexts[player.color];
-      hpText.setText(`HP: ${hp}`);
-      hpText.x = b.head.x;
-      hpText.y = b.head.y - 45;
-      hpText.setTint(hp < 25 ? 0xff0000 : 0x000000);
     }
   }
 }
@@ -258,5 +247,4 @@ new Phaser.Game({
   backgroundColor: "#ffffff",
   scene: [MenuScene, StickmenScene],
 });
-
 
