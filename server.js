@@ -1,127 +1,196 @@
-const WebSocket = require("ws");
-const wss = new WebSocket.Server({ port: 3000 });
-
-let rooms = {}; // roomId -> { players: [], closed: false }
-
-// === Création et gestion de rooms ===
-function createRoom() {
-  const id = "room-" + Math.random().toString(36).substr(2, 6);
-  rooms[id] = { players: [], closed: false };
-  return id;
-}
-
-function findAvailableRoom() {
-  for (const id in rooms) {
-    const room = rooms[id];
-    if (!room.closed && room.players.length < 2) return id;
+window.addEventListener("load", () => {
+  if (window.CrazyGames) {
+    const crazySDK = window.CrazyGames.CrazySDK.getInstance();
+    crazySDK.init();
+    crazySDK.gameplayStart();
+    console.log("CrazyGames SDK initialisé ✅");
+  } else {
+    console.log("⚠️ CrazyGames SDK non détecté (test local).");
   }
-  return createRoom();
-}
-
-// === Broadcast helper ===
-function broadcastState(roomId) {
-  const room = rooms[roomId];
-  if (!room || room.closed) return;
-
-  const playersState = {};
-  room.players.forEach((p, index) => {
-    playersState[index] = {
-      color: p.color,
-      hp: p.hp,
-      parts: p.parts,
-    };
-  });
-
-  const stateMessage = JSON.stringify({
-    type: "state",
-    players: playersState,
-  });
-
-  room.players.forEach(p => {
-    if (p.readyState === WebSocket.OPEN) p.send(stateMessage);
-  });
-}
-
-// === Lancement du serveur WebSocket ===
-wss.on("connection", (ws) => {
-  const roomId = findAvailableRoom();
-  const room = rooms[roomId];
-  room.players.push(ws);
-  ws.roomId = roomId;
-  ws.hp = 100;
-  ws.parts = generateDummyStickman(); // pour test d'affichage
-
-  const playerColor = room.players.length === 1 ? "black" : "red";
-  ws.color = playerColor;
-
-  console.log(`👥 Joueur connecté dans ${roomId} (${playerColor})`);
-
-  // Envoyer infos initiales
-  ws.send(JSON.stringify({
-    type: "init",
-    id: Math.random().toString(36).substr(2, 9),
-    color: playerColor,
-  }));
-
-  // Réception des messages du joueur
-  ws.on("message", (msg) => {
-    const data = JSON.parse(msg);
-    const room = rooms[ws.roomId];
-    if (!room || room.closed) {
-      ws.send(JSON.stringify({ type: "roomClosed" }));
-      return;
-    }
-
-    if (data.type === "pointerMove") {
-      ws.parts.head.x = data.pointer.x;
-      ws.parts.head.y = data.pointer.y;
-    }
-
-    if (data.type === "exitGame") {
-      console.log(`🚪 Fermeture de ${ws.roomId}`);
-      room.closed = true;
-      room.players.forEach((p) => {
-        if (p.readyState === WebSocket.OPEN)
-          p.send(JSON.stringify({ type: "goToMenu" }));
-      });
-    }
-  });
-
-  // Fermeture
-  ws.on("close", () => {
-    const room = rooms[ws.roomId];
-    if (!room) return;
-    room.players = room.players.filter(p => p !== ws);
-    if (room.players.length === 0) {
-      room.closed = true;
-      console.log(`💀 Room ${ws.roomId} supprimée (vide)`);
-    }
-  });
 });
 
-// === Simulation / Broadcast régulier (60 FPS ≈ 16 ms) ===
-setInterval(() => {
-  for (const roomId in rooms) {
-    broadcastState(roomId);
-  }
-}, 100); // toutes les 100 ms
+const ws = new WebSocket("wss://stickmen-server.onrender.com");
+// const ws = new WebSocket("ws://localhost:3000");
 
-// === Génération basique d’un stickman (position de test) ===
-function generateDummyStickman() {
-  return {
-    head: { x: 400, y: 300 },
-    chest: { x: 400, y: 330 },
-    pelvis: { x: 400, y: 360 },
-    armL: { x: 370, y: 330 },
-    armR: { x: 430, y: 330 },
-    handL: { x: 350, y: 330 },
-    handR: { x: 450, y: 330 },
-    legL: { x: 380, y: 390 },
-    legR: { x: 420, y: 390 },
-    footL: { x: 370, y: 400 },
-    footR: { x: 430, y: 400 },
-  };
+let id, color;
+let players = {};
+let pointer = { x: 400, y: 300 };
+
+class StickmenScene extends Phaser.Scene {
+  constructor() {
+    super();
+  }
+
+  create() {
+    this.graphics = this.add.graphics();
+    this.hpTexts = {};
+    this.replayButtonShown = false;
+
+    // Mouvement du pointeur
+    this.input.on("pointermove", (p) => {
+      pointer = { x: p.x, y: p.y };
+      const me = players[id];
+      if (!me || me.hp <= 0) return;
+      if (ws.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ type: "pointerMove", pointer }));
+    });
+
+    // Messages WebSocket
+    ws.onmessage = (msg) => {
+      const data = JSON.parse(msg.data);
+
+      // Initialisation
+      if (data.type === "init") {
+        id = data.id;
+        color = data.color;
+        console.log("👤 Joueur initialisé:", id, color);
+      }
+
+      // Synchronisation des états
+      else if (data.type === "state") {
+        players = data.players;
+
+        // 🩸 Détection KO depuis le serveur
+        const me = players[id];
+        if (me && typeof me.hp === "number" && me.hp <= 0 && !this.replayButtonShown) {
+          console.log("💀 KO détecté via WebSocket — affichage du bouton Replay");
+          this.replayButtonShown = true;
+          this.showReplayButton();
+        }
+      }
+    };
+  }
+
+  update() {
+    this.graphics.clear();
+
+    // Dessine tous les joueurs
+    for (const pid in players) {
+      const player = players[pid];
+      if (!player.parts || !player.parts.head) continue;
+      const col = player.color === "black" ? 0x000000 : 0xff0000;
+      this.drawStickman(player, col);
+    }
+  }
+
+  // === 🆕 Bouton Replay ===
+  showReplayButton() {
+    if (document.getElementById("replay-btn")) return; // déjà affiché
+
+    const btn = document.createElement("button");
+    btn.id = "replay-btn";
+    btn.innerText = "🔁 Rejouer";
+
+    Object.assign(btn.style, {
+      position: "fixed",
+      top: "50%",
+      left: "50%",
+      transform: "translate(-50%, -50%)",
+      padding: "15px 35px",
+      fontSize: "24px",
+      fontWeight: "bold",
+      border: "none",
+      borderRadius: "12px",
+      background: "#28a745",
+      color: "#fff",
+      cursor: "pointer",
+      boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+      zIndex: "99999",
+      transition: "all 0.2s ease",
+    });
+
+    btn.onmouseenter = () => {
+      btn.style.background = "#34d058";
+      btn.style.transform = "translate(-50%, -50%) scale(1.05)";
+    };
+    btn.onmouseleave = () => {
+      btn.style.background = "#28a745";
+      btn.style.transform = "translate(-50%, -50%) scale(1)";
+    };
+
+    btn.onclick = () => {
+      console.log("🔁 Rechargement du jeu...");
+      btn.remove();
+      location.reload();
+    };
+
+    document.body.appendChild(btn);
+    console.log("✅ Bouton Replay ajouté au DOM");
+  }
+
+  // === 🎨 Dessin du stickman ===
+  drawStickman(player, color) {
+    const b = player.parts;
+    const g = this.graphics;
+    g.lineStyle(3, color);
+
+    const L = (a, b) => {
+      if (a && b) {
+        g.moveTo(a.x, a.y);
+        g.lineTo(b.x, b.y);
+      }
+    };
+
+    g.beginPath();
+    L(b.head, b.chest);
+    L(b.chest, b.pelvis);
+    L(b.chest, b.armL);
+    L(b.chest, b.armR);
+    L(b.armL, b.handL);
+    L(b.armR, b.handR);
+    L(b.pelvis, b.legL);
+    L(b.pelvis, b.legR);
+    L(b.legL, b.footL);
+    L(b.legR, b.footR);
+    g.strokePath();
+
+    // Articulations
+    if (b.head) g.strokeCircle(b.head.x, b.head.y, 10);
+    if (b.handL) g.strokeCircle(b.handL.x, b.handL.y, 4);
+    if (b.handR) g.strokeCircle(b.handR.x, b.handR.y, 4);
+    if (b.footL) g.strokeCircle(b.footL.x, b.footL.y, 5);
+    if (b.footR) g.strokeCircle(b.footR.x, b.footR.y, 5);
+
+    // ❤️ Barre de vie
+    const hp = player.hp !== undefined ? player.hp : 100;
+    const ratio = Phaser.Math.Clamp(hp / 100, 0, 1);
+    let barColor = 0x00ff00;
+    if (ratio < 0.5) barColor = 0xffff00;
+    if (ratio < 0.25) barColor = 0xff0000;
+
+    if (b.head) {
+      const barWidth = 40;
+      const barHeight = 6;
+      const x = b.head.x - barWidth / 2;
+      const y = b.head.y - 30;
+
+      g.fillStyle(0xaaaaaa);
+      g.fillRect(x, y, barWidth, barHeight);
+      g.fillStyle(barColor);
+      g.fillRect(x, y, barWidth * ratio, barHeight);
+      g.lineStyle(1, 0x000000);
+      g.strokeRect(x, y, barWidth, barHeight);
+
+      if (!this.hpTexts[player.color]) {
+        this.hpTexts[player.color] = this.add.text(0, 0, "HP: 100", {
+          font: "12px Arial",
+          fill: "#000",
+        }).setDepth(10).setOrigin(0.5);
+      }
+
+      const hpText = this.hpTexts[player.color];
+      hpText.setText(`HP: ${hp}`);
+      hpText.x = b.head.x;
+      hpText.y = b.head.y - 45;
+      hpText.setTint(hp < 25 ? 0xff0000 : 0x000000);
+    }
+  }
 }
 
-console.log("✅ Serveur Stickmen prêt sur ws://localhost:3000");
-
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: 800,
+  height: 600,
+  backgroundColor: "#ffffff",
+  scene: StickmenScene,
+});
