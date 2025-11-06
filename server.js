@@ -1,196 +1,140 @@
-window.addEventListener("load", () => {
-  if (window.CrazyGames) {
-    const crazySDK = window.CrazyGames.CrazySDK.getInstance();
-    crazySDK.init();
-    crazySDK.gameplayStart();
-    console.log("CrazyGames SDK initialisé ✅");
-  } else {
-    console.log("⚠️ CrazyGames SDK non détecté (test local).");
+// === 🧠 Serveur Node.js avec moteur physique et rooms ===
+import { WebSocketServer } from "ws";
+import Matter from "matter-js";
+
+const wss = new WebSocketServer({ port: 3000 });
+console.log("✅ Serveur Stickmen avec physique lancé sur ws://localhost:3000");
+
+// --- Gestion des rooms ---
+let rooms = {}; // { roomId: { players: [], engine, world, closed } }
+
+function createRoom() {
+  const id = "room-" + Math.random().toString(36).substr(2, 6);
+  const engine = Matter.Engine.create();
+  const world = engine.world;
+  world.gravity.y = 1; // gravité
+  rooms[id] = { id, players: [], engine, world, closed: false };
+  return id;
+}
+
+function findAvailableRoom() {
+  for (const id in rooms) {
+    const room = rooms[id];
+    if (!room.closed && room.players.length < 2) return id;
   }
-});
+  return createRoom();
+}
 
-const ws = new WebSocket("wss://stickmen-server.onrender.com");
-// const ws = new WebSocket("ws://localhost:3000");
+// --- Création du stickman ---
+function createStickman(x, y, color) {
+  const size = 10;
+  return {
+    color,
+    hp: 100,
+    parts: {
+      head: { x, y },
+      chest: { x, y + 30 },
+      pelvis: { x, y + 60 },
+      armL: { x: x - 20, y: y + 30 },
+      armR: { x: x + 20, y: y + 30 },
+      handL: { x: x - 40, y: y + 30 },
+      handR: { x: x + 40, y: y + 30 },
+      legL: { x: x - 10, y: y + 80 },
+      legR: { x: x + 10, y: y + 80 },
+      footL: { x: x - 20, y: y + 100 },
+      footR: { x: x + 20, y: y + 100 },
+    },
+    velocity: { x: 0, y: 0 },
+  };
+}
 
-let id, color;
-let players = {};
-let pointer = { x: 400, y: 300 };
+// --- Simulation simple ---
+function updatePhysics(room) {
+  const { players } = room;
+  for (const p of players) {
+    if (!p.stickman) continue;
+    const s = p.stickman;
 
-class StickmenScene extends Phaser.Scene {
-  constructor() {
-    super();
-  }
+    // Gravité et mouvement basique
+    s.velocity.y += 0.5;
+    s.parts.head.y += s.velocity.y;
+    s.parts.chest.y += s.velocity.y;
+    s.parts.pelvis.y += s.velocity.y;
 
-  create() {
-    this.graphics = this.add.graphics();
-    this.hpTexts = {};
-    this.replayButtonShown = false;
-
-    // Mouvement du pointeur
-    this.input.on("pointermove", (p) => {
-      pointer = { x: p.x, y: p.y };
-      const me = players[id];
-      if (!me || me.hp <= 0) return;
-      if (ws.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({ type: "pointerMove", pointer }));
-    });
-
-    // Messages WebSocket
-    ws.onmessage = (msg) => {
-      const data = JSON.parse(msg.data);
-
-      // Initialisation
-      if (data.type === "init") {
-        id = data.id;
-        color = data.color;
-        console.log("👤 Joueur initialisé:", id, color);
-      }
-
-      // Synchronisation des états
-      else if (data.type === "state") {
-        players = data.players;
-
-        // 🩸 Détection KO depuis le serveur
-        const me = players[id];
-        if (me && typeof me.hp === "number" && me.hp <= 0 && !this.replayButtonShown) {
-          console.log("💀 KO détecté via WebSocket — affichage du bouton Replay");
-          this.replayButtonShown = true;
-          this.showReplayButton();
-        }
-      }
-    };
-  }
-
-  update() {
-    this.graphics.clear();
-
-    // Dessine tous les joueurs
-    for (const pid in players) {
-      const player = players[pid];
-      if (!player.parts || !player.parts.head) continue;
-      const col = player.color === "black" ? 0x000000 : 0xff0000;
-      this.drawStickman(player, col);
+    // Sol
+    if (s.parts.pelvis.y > 500) {
+      s.parts.pelvis.y = 500;
+      s.velocity.y = 0;
     }
-  }
 
-  // === 🆕 Bouton Replay ===
-  showReplayButton() {
-    if (document.getElementById("replay-btn")) return; // déjà affiché
-
-    const btn = document.createElement("button");
-    btn.id = "replay-btn";
-    btn.innerText = "🔁 Rejouer";
-
-    Object.assign(btn.style, {
-      position: "fixed",
-      top: "50%",
-      left: "50%",
-      transform: "translate(-50%, -50%)",
-      padding: "15px 35px",
-      fontSize: "24px",
-      fontWeight: "bold",
-      border: "none",
-      borderRadius: "12px",
-      background: "#28a745",
-      color: "#fff",
-      cursor: "pointer",
-      boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
-      zIndex: "99999",
-      transition: "all 0.2s ease",
-    });
-
-    btn.onmouseenter = () => {
-      btn.style.background = "#34d058";
-      btn.style.transform = "translate(-50%, -50%) scale(1.05)";
-    };
-    btn.onmouseleave = () => {
-      btn.style.background = "#28a745";
-      btn.style.transform = "translate(-50%, -50%) scale(1)";
-    };
-
-    btn.onclick = () => {
-      console.log("🔁 Rechargement du jeu...");
-      btn.remove();
-      location.reload();
-    };
-
-    document.body.appendChild(btn);
-    console.log("✅ Bouton Replay ajouté au DOM");
-  }
-
-  // === 🎨 Dessin du stickman ===
-  drawStickman(player, color) {
-    const b = player.parts;
-    const g = this.graphics;
-    g.lineStyle(3, color);
-
-    const L = (a, b) => {
-      if (a && b) {
-        g.moveTo(a.x, a.y);
-        g.lineTo(b.x, b.y);
-      }
-    };
-
-    g.beginPath();
-    L(b.head, b.chest);
-    L(b.chest, b.pelvis);
-    L(b.chest, b.armL);
-    L(b.chest, b.armR);
-    L(b.armL, b.handL);
-    L(b.armR, b.handR);
-    L(b.pelvis, b.legL);
-    L(b.pelvis, b.legR);
-    L(b.legL, b.footL);
-    L(b.legR, b.footR);
-    g.strokePath();
-
-    // Articulations
-    if (b.head) g.strokeCircle(b.head.x, b.head.y, 10);
-    if (b.handL) g.strokeCircle(b.handL.x, b.handL.y, 4);
-    if (b.handR) g.strokeCircle(b.handR.x, b.handR.y, 4);
-    if (b.footL) g.strokeCircle(b.footL.x, b.footL.y, 5);
-    if (b.footR) g.strokeCircle(b.footR.x, b.footR.y, 5);
-
-    // ❤️ Barre de vie
-    const hp = player.hp !== undefined ? player.hp : 100;
-    const ratio = Phaser.Math.Clamp(hp / 100, 0, 1);
-    let barColor = 0x00ff00;
-    if (ratio < 0.5) barColor = 0xffff00;
-    if (ratio < 0.25) barColor = 0xff0000;
-
-    if (b.head) {
-      const barWidth = 40;
-      const barHeight = 6;
-      const x = b.head.x - barWidth / 2;
-      const y = b.head.y - 30;
-
-      g.fillStyle(0xaaaaaa);
-      g.fillRect(x, y, barWidth, barHeight);
-      g.fillStyle(barColor);
-      g.fillRect(x, y, barWidth * ratio, barHeight);
-      g.lineStyle(1, 0x000000);
-      g.strokeRect(x, y, barWidth, barHeight);
-
-      if (!this.hpTexts[player.color]) {
-        this.hpTexts[player.color] = this.add.text(0, 0, "HP: 100", {
-          font: "12px Arial",
-          fill: "#000",
-        }).setDepth(10).setOrigin(0.5);
-      }
-
-      const hpText = this.hpTexts[player.color];
-      hpText.setText(`HP: ${hp}`);
-      hpText.x = b.head.x;
-      hpText.y = b.head.y - 45;
-      hpText.setTint(hp < 25 ? 0xff0000 : 0x000000);
-    }
+    // Légère oscillation du corps (pour vie visuelle)
+    s.parts.head.x += Math.sin(Date.now() / 500) * 0.5;
   }
 }
 
-new Phaser.Game({
-  type: Phaser.AUTO,
-  width: 800,
-  height: 600,
-  backgroundColor: "#ffffff",
-  scene: StickmenScene,
-});
+// --- Envoi d'état à tous les joueurs ---
+function broadcastState(room) {
+  const payload = JSON.stringify({
+    type: "state",
+    players: Object.fromEntries(
+      room.players.map((p) => [p.id, p.stickman])
+    ),
+  });
+  room.players.forEach((p) => {
+    if (p.ws.readyState === 1) p.ws.send(payload);
+  });
+}
+
+// --- Simulation par frame ---
+setInterval(() => {
+  for (const id in rooms) {
+    const room = rooms[id];
+    if (room.closed) continue;
+    updatePhysics(room);
+    broadcastState(room);
+  }
+}, 60);
+
+// --- Connexion WebSocket ---
+wss.on("connection", (ws) => {
+  const roomId = findAvailableRoom();
+  const room = rooms[roomId];
+  const id = Math.random().toString(36).substr(2, 9);
+  const color = room.players.length === 0 ? "black" : "red";
+
+  const player = { id, ws, stickman: createStickman(400 + room.players.length * 100, 300, color) };
+  room.players.push(player);
+  ws.roomId = roomId;
+
+  console.log(`👤 Joueur ${id} rejoint ${roomId} (${color})`);
+
+  // Envoi d’initialisation
+  ws.send(JSON.stringify({ type: "init", id, color }));
+
+  // Messages entrants
+  ws.on("message", (msg) => {
+    const data = JSON.parse(msg);
+    const room = rooms[ws.roomId];
+    if (!room || room.closed) return;
+
+    if (data.type === "pointerMove") {
+      const p = room.players.find((pl) => pl.ws === ws);
+      if (p && p.stickman) {
+        // Influence légère du pointeur sur la tête
+        p.stickman.parts.head.x += (data.pointer.x - p.stickman.parts.head.x) * 0.1;
+        p.stickman.parts.head.y += (data.pointer.y - p.stickman.parts.head.y) * 0.1;
+      }
+    }
+
+    if (data.type === "exitGame") {
+      console.log(`🚪 Fermeture de ${room.id}`);
+      room.closed = true;
+      room.players.forEach((pl) => {
+        if (pl.ws.readyState === 1)
+          pl.ws.send(JSON.stringify({ type: "goToMenu" }));
+      });
+    }
+  });
+
+  ws.on("close", () => {
+    cons
