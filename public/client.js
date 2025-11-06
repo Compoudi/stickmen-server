@@ -65,14 +65,6 @@ function initWebSocket(scene) {
         scene.scene.start("MenuScene");
       }
     }
-
-    if (data.type === "roomClosed") {
-      alert("⚠️ La partie que vous essayez de rejoindre est terminée.");
-      if (scene.scene.isActive("StickmenScene")) {
-        scene.scene.stop("StickmenScene");
-        scene.scene.start("MenuScene");
-      }
-    }
   };
 }
 
@@ -158,12 +150,10 @@ class StickmenScene extends Phaser.Scene {
     btn.onclick = () => {
       console.log("🚪 Exit → retour au menu principal");
 
-      // 🔥 informer le serveur que la partie est terminée
+      // 🔒 Fermer proprement le WebSocket
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "exitGame" }));
         ws.close(1000, "Exit to menu");
       }
-
       ws = null;
       wsConnected = false;
 
@@ -181,6 +171,10 @@ class StickmenScene extends Phaser.Scene {
 
       // Supprimer le bouton
       btn.remove();
+
+      // 💣 Optionnel : destruction complète du jeu (reset total)
+      // this.game.destroy(true);
+      // location.reload();
     };
 
     document.body.appendChild(btn);
@@ -251,3 +245,4 @@ new Phaser.Game({
   backgroundColor: "#ffffff",
   scene: [MenuScene, StickmenScene],
 });
+
