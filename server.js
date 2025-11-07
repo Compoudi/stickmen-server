@@ -37,18 +37,18 @@ function findAvailableRoom() {
 
 // === Création du stickman physique (Matter.js bodies + constraints) ===
 function createStickman(x, y, color, world) {
-  const head = Matter.Bodies.circle(x, y, 10, { restitution: 0.5, friction: 0.3 });
-  const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { restitution: 0.3 });
-  const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, { restitution: 0.3 });
-  const armL = Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { restitution: 0.3 });
-  const armR = Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { restitution: 0.3 });
-  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { restitution: 0.3 });
-  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { restitution: 0.3 });
+  const head = Matter.Bodies.circle(x, y, 10, { restitution: 0.5, frictionAir: 0.04 });
+  const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { restitution: 0.3, frictionAir: 0.05 });
+  const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, { restitution: 0.3, frictionAir: 0.05 });
+  const armL = Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { restitution: 0.3, frictionAir: 0.05 });
+  const armR = Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { restitution: 0.3, frictionAir: 0.05 });
+  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { restitution: 0.3, frictionAir: 0.05 });
+  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { restitution: 0.3, frictionAir: 0.05 });
 
   const bodies = [head, chest, pelvis, armL, armR, legL, legR];
   Matter.World.add(world, bodies);
 
-  // Liaisons physiques (contraintes souples)
+  // Liaisons physiques souples
   const constraints = [
     Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.6 }),
     Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.6 }),
@@ -94,7 +94,6 @@ setInterval(() => {
 
     Matter.Engine.update(room.engine, 1000 / 60);
 
-    // Création du payload d'état
     const state = {};
     for (const p of room.players) {
       if (!p.stickman) continue;
@@ -130,25 +129,24 @@ wss.on("connection", (ws) => {
     const player = room.players.find((p) => p.ws === ws);
     if (!player) return;
 
-    // === 🧭 Déplacement FLUIDE & DOUX du stickman ===
+    // === 🧭 Déplacement ULTRA DOUX du stickman ===
     if (data.type === "pointerMove" && player.stickman) {
       const head = player.stickman.bodies.head;
       const dx = data.pointer.x - head.position.x;
       const dy = data.pointer.y - head.position.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
 
-      // 🔧 Facteur de force très doux
-      const baseFactor = 0.000005; // encore plus lent
-      const factor = baseFactor * Math.min(distance / 150, 2); // max ×2 quand loin
+      // 🔧 Facteur de force très faible (≈ 4x plus lent)
+      const baseFactor = 0.0000015; // réduit fortement la vitesse
+      const factor = baseFactor * Math.min(distance / 200, 1.5);
 
-      // Applique une force plus douce et progressive
       const force = { x: dx * factor, y: dy * factor };
       Matter.Body.applyForce(head, head.position, force);
 
-      // Ajoute un léger amortissement pour plus d'inertie (ralentit la tête)
+      // Ajout d'un amortissement important pour limiter la vitesse
       Matter.Body.setVelocity(head, {
-        x: head.velocity.x * 0.95,
-        y: head.velocity.y * 0.95,
+        x: head.velocity.x * 0.9,
+        y: head.velocity.y * 0.9,
       });
     }
 
