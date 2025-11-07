@@ -130,19 +130,26 @@ wss.on("connection", (ws) => {
     const player = room.players.find((p) => p.ws === ws);
     if (!player) return;
 
-    // === 🧭 Déplacement fluide du stickman ===
+    // === 🧭 Déplacement FLUIDE & DOUX du stickman ===
     if (data.type === "pointerMove" && player.stickman) {
       const head = player.stickman.bodies.head;
       const dx = data.pointer.x - head.position.x;
       const dy = data.pointer.y - head.position.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
 
-      // 🔧 Force adaptative (plus lente si curseur proche)
-      const baseFactor = 0.00002; // vitesse de base (plus lente qu’avant)
-      const factor = baseFactor * Math.min(distance / 100, 3); // max ×3 quand loin
+      // 🔧 Facteur de force très doux
+      const baseFactor = 0.000005; // encore plus lent
+      const factor = baseFactor * Math.min(distance / 150, 2); // max ×2 quand loin
 
+      // Applique une force plus douce et progressive
       const force = { x: dx * factor, y: dy * factor };
       Matter.Body.applyForce(head, head.position, force);
+
+      // Ajoute un léger amortissement pour plus d'inertie (ralentit la tête)
+      Matter.Body.setVelocity(head, {
+        x: head.velocity.x * 0.95,
+        y: head.velocity.y * 0.95,
+      });
     }
 
     // === 🚪 Sortie de la partie ===
