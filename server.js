@@ -1,4 +1,4 @@
-// === 🧠 Serveur Stickmen multijoueur avec physique réaliste stable ===
+// === 🧠 Serveur Stickmen multijoueur avec physique stable ===
 import { WebSocketServer } from "ws";
 import Matter from "matter-js";
 
@@ -7,14 +7,14 @@ console.log("✅ Serveur Stickmen Physique lancé sur ws://localhost:3000");
 
 let rooms = {}; // { roomId: { engine, world, players, closed } }
 
-// === Création d'une nouvelle room ===
 function createRoom() {
   const id = "room-" + Math.random().toString(36).substr(2, 6);
   const engine = Matter.Engine.create();
   const world = engine.world;
-  world.gravity.y = 0.5; // gravité réaliste
-  engine.enableSleeping = false;
+  world.gravity.y = 0.5; // gravité douce et réaliste
+  engine.enableSleeping = false; // 🚫 désactive totalement le mode sommeil
 
+  // Sol
   const ground = Matter.Bodies.rectangle(400, 580, 800, 40, {
     isStatic: true,
     label: "ground",
@@ -34,40 +34,34 @@ function findAvailableRoom() {
   return createRoom();
 }
 
-// === Création du stickman physique (réaliste et stable) ===
+// === Création du stickman physique ===
 function createStickman(x, y, color, world) {
-  const bodyOptions = {
-    density: 0.00008,     // ⚖️ densité équilibrée
-    friction: 0.1,        // frottement modéré
-    restitution: 0.35,    // rebond léger
-    frictionAir: 0.008,   // résistance de l’air équilibrée
-  };
-
-  const head = Matter.Bodies.circle(x, y, 10, bodyOptions);
-  const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, bodyOptions);
-  const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, bodyOptions);
-  const armL = Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, bodyOptions);
-  const armR = Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, bodyOptions);
-  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, bodyOptions);
-  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, bodyOptions);
+  const head = Matter.Bodies.circle(x, y, 10, { restitution: 0.4, friction: 0.2 });
+  const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { restitution: 0.3, friction: 0.3 });
+  const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, { restitution: 0.3, friction: 0.3 });
+  const armL = Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { restitution: 0.3, friction: 0.3 });
+  const armR = Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { restitution: 0.3, friction: 0.3 });
+  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { restitution: 0.3, friction: 0.3 });
+  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { restitution: 0.3, friction: 0.3 });
 
   const bodies = [head, chest, pelvis, armL, armR, legL, legR];
   Matter.World.add(world, bodies);
 
+  // 🧠 Solution #2 : empêcher le "sleep" et le mode statique
   for (const body of bodies) {
     body.isSleeping = false;
     body.isStatic = false;
   }
   if (world.engine) world.engine.enableSleeping = false;
 
-  // Contraintes légèrement plus rigides (meilleure cohésion)
+  // Contraintes souples (liaisons physiques)
   const constraints = [
-    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.65 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.65 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: armL, length: 25, stiffness: 0.55 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: armR, length: 25, stiffness: 0.55 }),
-    Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 25, stiffness: 0.55 }),
-    Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 25, stiffness: 0.55 }),
+    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.6 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.6 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: armL, length: 25, stiffness: 0.5 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: armR, length: 25, stiffness: 0.5 }),
+    Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 25, stiffness: 0.5 }),
+    Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 25, stiffness: 0.5 }),
   ];
   Matter.World.add(world, constraints);
 
@@ -116,7 +110,7 @@ setInterval(() => {
   }
 }, 1000 / 30);
 
-// === WebSocket ===
+// === WebSocket (connexion des joueurs) ===
 wss.on("connection", (ws) => {
   const roomId = findAvailableRoom();
   const room = rooms[roomId];
@@ -131,7 +125,7 @@ wss.on("connection", (ws) => {
   console.log(`👤 Joueur ${id} connecté dans ${roomId} (${color})`);
   ws.send(JSON.stringify({ type: "init", id, color }));
 
-  // Envoi initial
+  // Envoi initial de l'état des deux joueurs
   const state = {};
   for (const p of room.players) state[p.id] = serializeStickman(p.stickman);
   const syncPayload = JSON.stringify({ type: "state", players: state });
@@ -145,14 +139,16 @@ wss.on("connection", (ws) => {
     const player = room.players.find((p) => p.ws === ws);
     if (!player) return;
 
-    // === Contrôle du mouvement (force réduite ×5)
     if (data.type === "pointerMove" && player.stickman) {
       const head = player.stickman.bodies.head;
       const dx = data.pointer.x - head.position.x;
       const dy = data.pointer.y - head.position.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
-      const factor = Math.min(0.0000004 * (distance / 150), 0.000002); // 🔧 force réduite
-      Matter.Body.applyForce(head, head.position, { x: dx * factor, y: dy * factor });
+      const factor = Math.min(0.000001 * (distance / 150), 0.000004);
+      const fx = dx * factor;
+      const fy = dy * factor;
+
+      Matter.Body.applyForce(head, head.position, { x: fx, y: fy });
     }
 
     if (data.type === "exitGame") {
@@ -170,6 +166,7 @@ wss.on("connection", (ws) => {
     room.players = room.players.filter((p) => p.ws !== ws);
     console.log(`❌ Joueur ${id} déconnecté de ${roomId}`);
     if (room.players.length === 0) {
+      // ✅ Solution 1 aussi (delay avant fermeture)
       setTimeout(() => {
         const r = rooms[roomId];
         if (r && r.players.length === 0) {
@@ -180,4 +177,6 @@ wss.on("connection", (ws) => {
     }
   });
 });
+
+
 
