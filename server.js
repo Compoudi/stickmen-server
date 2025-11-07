@@ -13,7 +13,7 @@ function createRoom() {
   const id = "room-" + Math.random().toString(36).substr(2, 6);
   const engine = Matter.Engine.create();
   const world = engine.world;
-  world.gravity.y = 1.0;
+  world.gravity.y = 1.2;
 
   // Sol
   const ground = Matter.Bodies.rectangle(400, 580, 800, 40, {
@@ -159,6 +159,7 @@ wss.on("connection", (ws) => {
     }
   });
 });
+
 
 
 
