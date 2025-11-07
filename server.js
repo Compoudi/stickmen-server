@@ -1,4 +1,4 @@
-// === 🧠 Serveur Stickmen multijoueur avec physique ultra-légère et stable ===
+// === 🧠 Serveur Stickmen multijoueur avec physique réaliste stable ===
 import { WebSocketServer } from "ws";
 import Matter from "matter-js";
 
@@ -12,12 +12,9 @@ function createRoom() {
   const id = "room-" + Math.random().toString(36).substr(2, 6);
   const engine = Matter.Engine.create();
   const world = engine.world;
+  world.gravity.y = 0.5; // gravité réaliste
+  engine.enableSleeping = false;
 
-  // 🌍 Gravité ultra douce pour physique aérienne
-  world.gravity.y = 0.36;
-  engine.enableSleeping = false; // 🚫 empêche le sommeil
-
-  // Sol
   const ground = Matter.Bodies.rectangle(400, 580, 800, 40, {
     isStatic: true,
     label: "ground",
@@ -29,7 +26,6 @@ function createRoom() {
   return id;
 }
 
-// === Recherche d'une room libre ou création ===
 function findAvailableRoom() {
   for (const id in rooms) {
     const room = rooms[id];
@@ -38,13 +34,13 @@ function findAvailableRoom() {
   return createRoom();
 }
 
-// === Création du stickman physique ===
+// === Création du stickman physique (réaliste et stable) ===
 function createStickman(x, y, color, world) {
   const bodyOptions = {
-    density: 0.000005,     // 🪶 extrême légèreté
-    friction: 0.05,        // glisse fluide
-    restitution: 0.55,     // rebond naturel
-    frictionAir: 0.003,    // résistance très douce
+    density: 0.00008,     // ⚖️ densité équilibrée
+    friction: 0.1,        // frottement modéré
+    restitution: 0.35,    // rebond léger
+    frictionAir: 0.008,   // résistance de l’air équilibrée
   };
 
   const head = Matter.Bodies.circle(x, y, 10, bodyOptions);
@@ -58,21 +54,20 @@ function createStickman(x, y, color, world) {
   const bodies = [head, chest, pelvis, armL, armR, legL, legR];
   Matter.World.add(world, bodies);
 
-  // 🚫 Empêche le "sleep" et le mode statique
   for (const body of bodies) {
     body.isSleeping = false;
     body.isStatic = false;
   }
   if (world.engine) world.engine.enableSleeping = false;
 
-  // 🔗 Contraintes très souples pour plus de flexibilité
+  // Contraintes légèrement plus rigides (meilleure cohésion)
   const constraints = [
-    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.45 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.45 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: armL, length: 25, stiffness: 0.4 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: armR, length: 25, stiffness: 0.4 }),
-    Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 25, stiffness: 0.4 }),
-    Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 25, stiffness: 0.4 }),
+    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.65 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.65 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: armL, length: 25, stiffness: 0.55 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: armR, length: 25, stiffness: 0.55 }),
+    Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 25, stiffness: 0.55 }),
+    Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 25, stiffness: 0.55 }),
   ];
   Matter.World.add(world, constraints);
 
@@ -83,7 +78,6 @@ function createStickman(x, y, color, world) {
   };
 }
 
-// === Sérialisation ===
 function serializeStickman(s) {
   const b = s.bodies;
   return {
@@ -122,7 +116,7 @@ setInterval(() => {
   }
 }, 1000 / 30);
 
-// === WebSocket (connexion des joueurs) ===
+// === WebSocket ===
 wss.on("connection", (ws) => {
   const roomId = findAvailableRoom();
   const room = rooms[roomId];
@@ -151,12 +145,13 @@ wss.on("connection", (ws) => {
     const player = room.players.find((p) => p.ws === ws);
     if (!player) return;
 
+    // === Contrôle du mouvement (force réduite ×5)
     if (data.type === "pointerMove" && player.stickman) {
       const head = player.stickman.bodies.head;
       const dx = data.pointer.x - head.position.x;
       const dy = data.pointer.y - head.position.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
-      const factor = Math.min(0.000002 * (distance / 150), 0.000008); // un peu plus de force
+      const factor = Math.min(0.0000004 * (distance / 150), 0.000002); // 🔧 force réduite
       Matter.Body.applyForce(head, head.position, { x: dx * factor, y: dy * factor });
     }
 
@@ -174,7 +169,6 @@ wss.on("connection", (ws) => {
     if (!room) return;
     room.players = room.players.filter((p) => p.ws !== ws);
     console.log(`❌ Joueur ${id} déconnecté de ${roomId}`);
-
     if (room.players.length === 0) {
       setTimeout(() => {
         const r = rooms[roomId];
@@ -186,7 +180,4 @@ wss.on("connection", (ws) => {
     }
   });
 });
-
-
-
 
