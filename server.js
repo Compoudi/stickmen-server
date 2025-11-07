@@ -36,13 +36,20 @@ function findAvailableRoom() {
 
 // === Création du stickman physique ===
 function createStickman(x, y, color, world) {
-  const head = Matter.Bodies.circle(x, y, 10, { restitution: 0.4, friction: 0.2 });
-  const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { restitution: 0.3, friction: 0.3 });
-  const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, { restitution: 0.3, friction: 0.3 });
-  const armL = Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { restitution: 0.3, friction: 0.3 });
-  const armR = Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { restitution: 0.3, friction: 0.3 });
-  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { restitution: 0.3, friction: 0.3 });
-  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { restitution: 0.3, friction: 0.3 });
+  const bodyOptions = {
+    density: 0.0003,       // ⚖️ plus léger
+    friction: 0.15,        // glisse légèrement
+    restitution: 0.4,      // petit rebond
+    frictionAir: 0.01,     // moins de lourdeur
+  };
+
+  const head = Matter.Bodies.circle(x, y, 10, bodyOptions);
+  const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, bodyOptions);
+  const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, bodyOptions);
+  const armL = Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, bodyOptions);
+  const armR = Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, bodyOptions);
+  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, bodyOptions);
+  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, bodyOptions);
 
   const bodies = [head, chest, pelvis, armL, armR, legL, legR];
   Matter.World.add(world, bodies);
@@ -177,4 +184,6 @@ wss.on("connection", (ws) => {
     }
   });
 });
+
+
 
