@@ -14,7 +14,7 @@ function createRoom() {
   const world = engine.world;
 
   // 🌍 Gravité ultra douce pour physique aérienne
-  world.gravity.y = 0.4;
+  world.gravity.y = 0.36;
   engine.enableSleeping = false; // 🚫 empêche le sommeil
 
   // Sol
@@ -186,6 +186,7 @@ wss.on("connection", (ws) => {
     }
   });
 });
+
 
 
 
