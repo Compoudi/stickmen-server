@@ -130,13 +130,21 @@ wss.on("connection", (ws) => {
     const player = room.players.find((p) => p.ws === ws);
     if (!player) return;
 
+    // === 🧲 Suivi du curseur plus proche et fluide ===
     if (data.type === "pointerMove" && player.stickman) {
-      // Attraction légère vers le pointeur
-      const head = player.stickman.bodies.head;
-      const dx = data.pointer.x - head.position.x;
-      const dy = data.pointer.y - head.position.y;
-      const force = { x: dx * 0.00005, y: dy * 0.00005 };
-      Matter.Body.applyForce(head, head.position, force);
+      const b = player.stickman.bodies;
+      const dx = data.pointer.x - b.head.position.x;
+      const dy = data.pointer.y - b.head.position.y;
+
+      // Force principale sur la tête
+      const headForce = { x: dx * 0.00020, y: dy * 0.00020 };
+      Matter.Body.applyForce(b.head, b.head.position, headForce);
+
+      // Légère traction du torse et du bassin pour un mouvement plus naturel
+      const chestForce = { x: dx * 0.00005, y: dy * 0.00005 };
+      const pelvisForce = { x: dx * 0.00003, y: dy * 0.00003 };
+      Matter.Body.applyForce(b.chest, b.chest.position, chestForce);
+      Matter.Body.applyForce(b.pelvis, b.pelvis.position, pelvisForce);
     }
 
     if (data.type === "exitGame") {
