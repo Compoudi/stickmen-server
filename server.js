@@ -1,18 +1,19 @@
-// === 🧠 Serveur Stickmen multijoueur avec physique stable ===
+// === 🧠 Serveur Stickmen avec physique Matter.js complète ===
 import { WebSocketServer } from "ws";
 import Matter from "matter-js";
 
 const wss = new WebSocketServer({ port: 3000 });
 console.log("✅ Serveur Stickmen Physique lancé sur ws://localhost:3000");
 
+// === Gestion des rooms ===
 let rooms = {}; // { roomId: { engine, world, players, closed } }
 
 function createRoom() {
   const id = "room-" + Math.random().toString(36).substr(2, 6);
   const engine = Matter.Engine.create();
   const world = engine.world;
-  world.gravity.y = 0.5; // gravité douce et réaliste
-  engine.enableSleeping = false; // 🚫 désactive totalement le mode sommeil
+
+  world.gravity.y = 1.2;
 
   // Sol
   const ground = Matter.Bodies.rectangle(400, 580, 800, 40, {
@@ -22,7 +23,6 @@ function createRoom() {
   Matter.World.add(world, ground);
 
   rooms[id] = { id, engine, world, players: [], closed: false };
-  console.log(`🏗️ Nouvelle room créée : ${id}`);
   return id;
 }
 
@@ -36,33 +36,27 @@ function findAvailableRoom() {
 
 // === Création du stickman physique ===
 function createStickman(x, y, color, world) {
-  const head = Matter.Bodies.circle(x, y, 10, { restitution: 0.4, friction: 0.2 });
-  const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { restitution: 0.3, friction: 0.3 });
-  const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, { restitution: 0.3, friction: 0.3 });
-  const armL = Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { restitution: 0.3, friction: 0.3 });
-  const armR = Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { restitution: 0.3, friction: 0.3 });
-  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { restitution: 0.3, friction: 0.3 });
-  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { restitution: 0.3, friction: 0.3 });
+  const head = Matter.Bodies.circle(x, y, 10, { density: 0.001, restitution: 0.4 });
+  const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { density: 0.002 });
+  const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, { density: 0.002 });
+  const armL = Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { density: 0.001 });
+  const armR = Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { density: 0.001 });
+  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { density: 0.002 });
+  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { density: 0.002 });
 
-  const bodies = [head, chest, pelvis, armL, armR, legL, legR];
-  Matter.World.add(world, bodies);
+  const parts = [head, chest, pelvis, armL, armR, legL, legR];
+  Matter.World.add(world, parts);
 
-  // 🧠 Solution #2 : empêcher le "sleep" et le mode statique
-  for (const body of bodies) {
-    body.isSleeping = false;
-    body.isStatic = false;
-  }
-  if (world.engine) world.engine.enableSleeping = false;
-
-  // Contraintes souples (liaisons physiques)
+  // Contraintes (liaisons)
   const constraints = [
-    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.6 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.6 }),
+    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.5 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.5 }),
     Matter.Constraint.create({ bodyA: chest, bodyB: armL, length: 25, stiffness: 0.5 }),
     Matter.Constraint.create({ bodyA: chest, bodyB: armR, length: 25, stiffness: 0.5 }),
     Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 25, stiffness: 0.5 }),
     Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 25, stiffness: 0.5 }),
   ];
+
   Matter.World.add(world, constraints);
 
   return {
@@ -72,6 +66,7 @@ function createStickman(x, y, color, world) {
   };
 }
 
+// === Extraction des positions physiques ===
 function serializeStickman(s) {
   const b = s.bodies;
   return {
@@ -91,13 +86,14 @@ function serializeStickman(s) {
   };
 }
 
-// === Boucle de simulation ===
+// === Simulation ===
 setInterval(() => {
   for (const id in rooms) {
     const room = rooms[id];
     if (room.closed) continue;
     Matter.Engine.update(room.engine, 1000 / 60);
 
+    // Envoi de l'état
     const state = {};
     for (const p of room.players) {
       if (!p.stickman) continue;
@@ -105,12 +101,13 @@ setInterval(() => {
     }
 
     const payload = JSON.stringify({ type: "state", players: state });
-    for (const p of room.players)
+    for (const p of room.players) {
       if (p.ws.readyState === 1) p.ws.send(payload);
+    }
   }
 }, 1000 / 30);
 
-// === WebSocket (connexion des joueurs) ===
+// === WebSocket ===
 wss.on("connection", (ws) => {
   const roomId = findAvailableRoom();
   const room = rooms[roomId];
@@ -125,13 +122,7 @@ wss.on("connection", (ws) => {
   console.log(`👤 Joueur ${id} connecté dans ${roomId} (${color})`);
   ws.send(JSON.stringify({ type: "init", id, color }));
 
-  // Envoi initial de l'état des deux joueurs
-  const state = {};
-  for (const p of room.players) state[p.id] = serializeStickman(p.stickman);
-  const syncPayload = JSON.stringify({ type: "state", players: state });
-  for (const p of room.players)
-    if (p.ws.readyState === 1) p.ws.send(syncPayload);
-
+  // --- Réception des messages ---
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
     const room = rooms[ws.roomId];
@@ -140,23 +131,21 @@ wss.on("connection", (ws) => {
     if (!player) return;
 
     if (data.type === "pointerMove" && player.stickman) {
+      // Attraction légère vers le pointeur
       const head = player.stickman.bodies.head;
       const dx = data.pointer.x - head.position.x;
       const dy = data.pointer.y - head.position.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      const factor = Math.min(0.000001 * (distance / 150), 0.000004);
-      const fx = dx * factor;
-      const fy = dy * factor;
-
-      Matter.Body.applyForce(head, head.position, { x: fx, y: fy });
+      const force = { x: dx * 0.00005, y: dy * 0.00005 };
+      Matter.Body.applyForce(head, head.position, force);
     }
 
     if (data.type === "exitGame") {
       console.log(`🚪 Fermeture de ${room.id}`);
       room.closed = true;
-      for (const pl of room.players)
+      for (const pl of room.players) {
         if (pl.ws.readyState === 1)
           pl.ws.send(JSON.stringify({ type: "goToMenu" }));
+      }
     }
   });
 
@@ -165,18 +154,7 @@ wss.on("connection", (ws) => {
     if (!room) return;
     room.players = room.players.filter((p) => p.ws !== ws);
     console.log(`❌ Joueur ${id} déconnecté de ${roomId}`);
-    if (room.players.length === 0) {
-      // ✅ Solution 1 aussi (delay avant fermeture)
-      setTimeout(() => {
-        const r = rooms[roomId];
-        if (r && r.players.length === 0) {
-          r.closed = true;
-          console.log(`🛑 Room ${roomId} fermée (vide après délai).`);
-        }
-      }, 2000);
-    }
+    if (room.players.length === 0) room.closed = true;
   });
 });
-
-
 
