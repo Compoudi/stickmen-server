@@ -130,14 +130,22 @@ wss.on("connection", (ws) => {
     const player = room.players.find((p) => p.ws === ws);
     if (!player) return;
 
+    // === 🧭 Déplacement fluide du stickman ===
     if (data.type === "pointerMove" && player.stickman) {
       const head = player.stickman.bodies.head;
       const dx = data.pointer.x - head.position.x;
       const dy = data.pointer.y - head.position.y;
-      const force = { x: dx * 0.00005, y: dy * 0.00005 };
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      // 🔧 Force adaptative (plus lente si curseur proche)
+      const baseFactor = 0.00002; // vitesse de base (plus lente qu’avant)
+      const factor = baseFactor * Math.min(distance / 100, 3); // max ×3 quand loin
+
+      const force = { x: dx * factor, y: dy * factor };
       Matter.Body.applyForce(head, head.position, force);
     }
 
+    // === 🚪 Sortie de la partie ===
     if (data.type === "exitGame") {
       console.log(`🚪 Fermeture de ${room.id}`);
       room.closed = true;
@@ -159,5 +167,4 @@ wss.on("connection", (ws) => {
     }
   });
 });
-
 
