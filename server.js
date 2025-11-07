@@ -1,9 +1,23 @@
 // === 🧠 Serveur Stickmen avec physique Matter.js complète ===
 import { WebSocketServer } from "ws";
 import Matter from "matter-js";
+import express from "express";
+import http from "http";
 
-const wss = new WebSocketServer({ port: 3000 });
-console.log("✅ Serveur Stickmen Physique lancé sur ws://localhost:3000");
+const app = express();
+
+// Petit endpoint test (utile pour Render)
+app.get("/", (req, res) => {
+  res.send("✅ Serveur Stickmen Physique en ligne");
+});
+
+// Création du serveur HTTP compatible WebSocket
+const server = http.createServer(app);
+const port = process.env.PORT || 3000;
+
+// WebSocket sur le même serveur HTTP
+const wss = new WebSocketServer({ server });
+server.listen(port, () => console.log(`✅ Serveur Stickmen lancé sur port ${port}`));
 
 // === Gestion des rooms ===
 let rooms = {}; // { roomId: { engine, world, players, closed } }
@@ -12,10 +26,8 @@ function createRoom() {
   const id = "room-" + Math.random().toString(36).substr(2, 6);
   const engine = Matter.Engine.create();
   const world = engine.world;
-
   world.gravity.y = 1.2;
 
-  // Sol
   const ground = Matter.Bodies.rectangle(400, 580, 800, 40, {
     isStatic: true,
     label: "ground",
@@ -34,7 +46,6 @@ function findAvailableRoom() {
   return createRoom();
 }
 
-// === Création du stickman physique ===
 function createStickman(x, y, color, world) {
   const head = Matter.Bodies.circle(x, y, 10, { density: 0.001, restitution: 0.4 });
   const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { density: 0.002 });
@@ -47,7 +58,6 @@ function createStickman(x, y, color, world) {
   const parts = [head, chest, pelvis, armL, armR, legL, legR];
   Matter.World.add(world, parts);
 
-  // Contraintes (liaisons)
   const constraints = [
     Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.5 }),
     Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.5 }),
@@ -66,7 +76,6 @@ function createStickman(x, y, color, world) {
   };
 }
 
-// === Extraction des positions physiques ===
 function serializeStickman(s) {
   const b = s.bodies;
   return {
@@ -93,7 +102,6 @@ setInterval(() => {
     if (room.closed) continue;
     Matter.Engine.update(room.engine, 1000 / 60);
 
-    // Envoi de l'état
     const state = {};
     for (const p of room.players) {
       if (!p.stickman) continue;
@@ -122,7 +130,6 @@ wss.on("connection", (ws) => {
   console.log(`👤 Joueur ${id} connecté dans ${roomId} (${color})`);
   ws.send(JSON.stringify({ type: "init", id, color }));
 
-  // --- Réception des messages ---
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
     const room = rooms[ws.roomId];
@@ -130,19 +137,14 @@ wss.on("connection", (ws) => {
     const player = room.players.find((p) => p.ws === ws);
     if (!player) return;
 
-    // === 🧲 Suivi du curseur plus proche et fluide ===
     if (data.type === "pointerMove" && player.stickman) {
       const b = player.stickman.bodies;
       const dx = data.pointer.x - b.head.position.x;
       const dy = data.pointer.y - b.head.position.y;
-
-      // Force principale sur la tête
-      const headForce = { x: dx * 0.00020, y: dy * 0.00020 };
-      Matter.Body.applyForce(b.head, b.head.position, headForce);
-
-      // Légère traction du torse et du bassin pour un mouvement plus naturel
+      const headForce = { x: dx * 0.0002, y: dy * 0.0002 };
       const chestForce = { x: dx * 0.00005, y: dy * 0.00005 };
       const pelvisForce = { x: dx * 0.00003, y: dy * 0.00003 };
+      Matter.Body.applyForce(b.head, b.head.position, headForce);
       Matter.Body.applyForce(b.chest, b.chest.position, chestForce);
       Matter.Body.applyForce(b.pelvis, b.pelvis.position, pelvisForce);
     }
