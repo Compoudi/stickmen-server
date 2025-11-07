@@ -12,8 +12,10 @@ function createRoom() {
   const id = "room-" + Math.random().toString(36).substr(2, 6);
   const engine = Matter.Engine.create();
   const world = engine.world;
-  world.gravity.y = 0.5; // gravité douce
-  engine.enableSleeping = false; // 🚫 désactive le mode sommeil
+
+  // 🌍 Gravité ultra douce pour physique aérienne
+  world.gravity.y = 0.35;
+  engine.enableSleeping = false; // 🚫 empêche le sommeil
 
   // Sol
   const ground = Matter.Bodies.rectangle(400, 580, 800, 40, {
@@ -39,10 +41,10 @@ function findAvailableRoom() {
 // === Création du stickman physique ===
 function createStickman(x, y, color, world) {
   const bodyOptions = {
-    density: 0.00005,      // 🪶 ultra léger (~20x plus léger)
-    friction: 0.08,        // peu de frottement au sol
-    restitution: 0.45,     // petit rebond fluide
-    frictionAir: 0.004,    // faible résistance de l’air
+    density: 0.000005,     // 🪶 extrême légèreté
+    friction: 0.05,        // glisse fluide
+    restitution: 0.55,     // rebond naturel
+    frictionAir: 0.003,    // résistance très douce
   };
 
   const head = Matter.Bodies.circle(x, y, 10, bodyOptions);
@@ -63,14 +65,14 @@ function createStickman(x, y, color, world) {
   }
   if (world.engine) world.engine.enableSleeping = false;
 
-  // 🔗 Contraintes souples (articulations)
+  // 🔗 Contraintes très souples pour plus de flexibilité
   const constraints = [
-    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.55 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.55 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: armL, length: 25, stiffness: 0.45 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: armR, length: 25, stiffness: 0.45 }),
-    Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 25, stiffness: 0.45 }),
-    Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 25, stiffness: 0.45 }),
+    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.45 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.45 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: armL, length: 25, stiffness: 0.4 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: armR, length: 25, stiffness: 0.4 }),
+    Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 25, stiffness: 0.4 }),
+    Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 25, stiffness: 0.4 }),
   ];
   Matter.World.add(world, constraints);
 
@@ -81,7 +83,7 @@ function createStickman(x, y, color, world) {
   };
 }
 
-// === Sérialisation des positions pour envoi réseau ===
+// === Sérialisation ===
 function serializeStickman(s) {
   const b = s.bodies;
   return {
@@ -106,7 +108,6 @@ setInterval(() => {
   for (const id in rooms) {
     const room = rooms[id];
     if (room.closed) continue;
-
     Matter.Engine.update(room.engine, 1000 / 60);
 
     const state = {};
@@ -136,14 +137,13 @@ wss.on("connection", (ws) => {
   console.log(`👤 Joueur ${id} connecté dans ${roomId} (${color})`);
   ws.send(JSON.stringify({ type: "init", id, color }));
 
-  // 🔄 Envoi initial de l'état complet
+  // Envoi initial
   const state = {};
   for (const p of room.players) state[p.id] = serializeStickman(p.stickman);
   const syncPayload = JSON.stringify({ type: "state", players: state });
   for (const p of room.players)
     if (p.ws.readyState === 1) p.ws.send(syncPayload);
 
-  // === Messages entrants du client ===
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
     const room = rooms[ws.roomId];
@@ -151,20 +151,15 @@ wss.on("connection", (ws) => {
     const player = room.players.find((p) => p.ws === ws);
     if (!player) return;
 
-    // === Contrôle de la tête (suivi du pointeur)
     if (data.type === "pointerMove" && player.stickman) {
       const head = player.stickman.bodies.head;
       const dx = data.pointer.x - head.position.x;
       const dy = data.pointer.y - head.position.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
-      const factor = Math.min(0.000001 * (distance / 150), 0.000004);
-      const fx = dx * factor;
-      const fy = dy * factor;
-
-      Matter.Body.applyForce(head, head.position, { x: fx, y: fy });
+      const factor = Math.min(0.000002 * (distance / 150), 0.000008); // un peu plus de force
+      Matter.Body.applyForce(head, head.position, { x: dx * factor, y: dy * factor });
     }
 
-    // === Fermeture de la partie
     if (data.type === "exitGame") {
       console.log(`🚪 Fermeture de ${room.id}`);
       room.closed = true;
@@ -174,7 +169,6 @@ wss.on("connection", (ws) => {
     }
   });
 
-  // === Déconnexion ===
   ws.on("close", () => {
     const room = rooms[ws.roomId];
     if (!room) return;
@@ -182,7 +176,6 @@ wss.on("connection", (ws) => {
     console.log(`❌ Joueur ${id} déconnecté de ${roomId}`);
 
     if (room.players.length === 0) {
-      // ✅ Fermeture différée (Solution 1)
       setTimeout(() => {
         const r = rooms[roomId];
         if (r && r.players.length === 0) {
