@@ -13,7 +13,6 @@ function createRoom() {
   const engine = Matter.Engine.create();
   const world = engine.world;
 
-  // Gravité inchangée (réaliste)
   world.gravity.y = 1.2;
 
   // Sol
@@ -37,26 +36,33 @@ function findAvailableRoom() {
 
 // === Création du stickman physique ===
 function createStickman(x, y, color, world) {
-  // 🧍 Stickman allégé (~40% plus léger)
+  // 🧍 Stickman léger mais avec bras visibles et stables
   const head = Matter.Bodies.circle(x, y, 10, { density: 0.0015, restitution: 0.4 });
   const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { density: 0.0025 });
   const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, { density: 0.0025 });
-  const armL = Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { density: 0.0015 });
-  const armR = Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { density: 0.0015 });
-  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { density: 0.0025 });
-  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { density: 0.0025 });
+
+  // 💪 Bras plus longs et un peu plus lourds (pour bien apparaître)
+  const armL = Matter.Bodies.rectangle(x - 30, y + 30, 25, 6, { density: 0.002 });
+  const armR = Matter.Bodies.rectangle(x + 30, y + 30, 25, 6, { density: 0.002 });
+
+  // 🦵 Jambes inchangées
+  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 6, 28, { density: 0.0025 });
+  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 6, 28, { density: 0.0025 });
 
   const parts = [head, chest, pelvis, armL, armR, legL, legR];
   Matter.World.add(world, parts);
 
-  // Contraintes (liaisons)
+  // 🔗 Contraintes entre les parties
   const constraints = [
-    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.55 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.55 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: armL, length: 25, stiffness: 0.55 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: armR, length: 25, stiffness: 0.55 }),
-    Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 25, stiffness: 0.55 }),
-    Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 25, stiffness: 0.55 }),
+    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.6 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.6 }),
+
+    // Bras attachés un peu plus rigides
+    Matter.Constraint.create({ bodyA: chest, bodyB: armL, length: 30, stiffness: 0.7 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: armR, length: 30, stiffness: 0.7 }),
+
+    Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 28, stiffness: 0.6 }),
+    Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 28, stiffness: 0.6 }),
   ];
 
   Matter.World.add(world, constraints);
@@ -135,7 +141,6 @@ wss.on("connection", (ws) => {
 
   const stickman = createStickman(300 + room.players.length * 200, 100, color, room.world);
 
-  // Pointeur par défaut au centre
   const player = { id, ws, stickman, pointer: { x: 400, y: 300 } };
   room.players.push(player);
   ws.roomId = roomId;
@@ -143,7 +148,6 @@ wss.on("connection", (ws) => {
   console.log(`👤 Joueur ${id} connecté dans ${roomId} (${color})`);
   ws.send(JSON.stringify({ type: "init", id, color }));
 
-  // --- Réception des messages ---
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
     const room = rooms[ws.roomId];
@@ -152,7 +156,6 @@ wss.on("connection", (ws) => {
     if (!player) return;
 
     if (data.type === "pointerMove" && player.stickman) {
-      // 🔁 Mise à jour de la position du pointeur
       player.pointer = data.pointer;
     }
 
@@ -174,3 +177,4 @@ wss.on("connection", (ws) => {
     if (room.players.length === 0) room.closed = true;
   });
 });
+
