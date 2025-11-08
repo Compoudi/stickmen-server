@@ -36,7 +36,7 @@ function findAvailableRoom() {
 
 // === Création du stickman physique ===
 function createStickman(x, y, color, world) {
-  // ⚖️ Stickman légèrement plus léger qu'avant
+  // ⚖️ Stickman légèrement plus léger pour plus de réactivité
   const head = Matter.Bodies.circle(x, y, 10, { density: 0.0025, restitution: 0.4 });
   const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { density: 0.004 });
   const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, { density: 0.004 });
@@ -94,16 +94,21 @@ setInterval(() => {
     if (room.closed) continue;
     Matter.Engine.update(room.engine, 1000 / 60);
 
-    // 💫 Attraction constante vers le pointeur
+    // 💫 Attraction constante vers le pointeur avec force dynamique
     for (const p of room.players) {
       if (!p.stickman || !p.pointer) continue;
 
       const head = p.stickman.bodies.head;
       const dx = p.pointer.x - head.position.x;
       const dy = p.pointer.y - head.position.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
 
-      // Force constante vers le pointeur (inchangée)
-      const force = { x: dx * 0.00003, y: dy * 0.00003 };
+      // Force dynamique (plus fort quand c'est loin, plus doux quand c'est proche)
+      // Exemple : distance = 100 → force = 0.00005 ; distance = 20 → force = 0.00001
+      const base = 0.0000015; // facteur global de force
+      const forceMultiplier = Math.min(distance * base, 0.00006);
+
+      const force = { x: dx * forceMultiplier, y: dy * forceMultiplier };
       Matter.Body.applyForce(head, head.position, force);
     }
 
