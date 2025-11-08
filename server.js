@@ -94,6 +94,19 @@ setInterval(() => {
     if (room.closed) continue;
     Matter.Engine.update(room.engine, 1000 / 60);
 
+    // 💫 Attraction constante vers le pointeur
+    for (const p of room.players) {
+      if (!p.stickman || !p.pointer) continue;
+
+      const head = p.stickman.bodies.head;
+      const dx = p.pointer.x - head.position.x;
+      const dy = p.pointer.y - head.position.y;
+
+      // Force constante vers le pointeur
+      const force = { x: dx * 0.00003, y: dy * 0.00003 };
+      Matter.Body.applyForce(head, head.position, force);
+    }
+
     // Envoi de l'état
     const state = {};
     for (const p of room.players) {
@@ -116,7 +129,9 @@ wss.on("connection", (ws) => {
   const color = room.players.length === 0 ? "black" : "red";
 
   const stickman = createStickman(300 + room.players.length * 200, 100, color, room.world);
-  const player = { id, ws, stickman };
+
+  // Ajout du pointeur par défaut au centre
+  const player = { id, ws, stickman, pointer: { x: 400, y: 300 } };
   room.players.push(player);
   ws.roomId = roomId;
 
@@ -132,12 +147,8 @@ wss.on("connection", (ws) => {
     if (!player) return;
 
     if (data.type === "pointerMove" && player.stickman) {
-      // Attraction légère vers le pointeur
-      const head = player.stickman.bodies.head;
-      const dx = data.pointer.x - head.position.x;
-      const dy = data.pointer.y - head.position.y;
-      const force = { x: dx * 0.00005, y: dy * 0.00005 };
-      Matter.Body.applyForce(head, head.position, force);
+      // 🔁 Mise à jour de la position du pointeur
+      player.pointer = data.pointer;
     }
 
     if (data.type === "exitGame") {
