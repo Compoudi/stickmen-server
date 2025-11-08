@@ -46,6 +46,7 @@ function findAvailableRoom() {
   return createRoom();
 }
 
+// === Création du stickman physique ===
 function createStickman(x, y, color, world) {
   const head = Matter.Bodies.circle(x, y, 10, { density: 0.001, restitution: 0.4 });
   const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { density: 0.002 });
@@ -76,6 +77,7 @@ function createStickman(x, y, color, world) {
   };
 }
 
+// === Extraction des positions physiques ===
 function serializeStickman(s) {
   const b = s.bodies;
   return {
@@ -137,13 +139,22 @@ wss.on("connection", (ws) => {
     const player = room.players.find((p) => p.ws === ws);
     if (!player) return;
 
+    // === 🎯 Force constante et stable pour un suivi fluide ===
     if (data.type === "pointerMove" && player.stickman) {
       const b = player.stickman.bodies;
       const dx = data.pointer.x - b.head.position.x;
       const dy = data.pointer.y - b.head.position.y;
-      const headForce = { x: dx * 0.0002, y: dy * 0.0002 };
-      const chestForce = { x: dx * 0.00005, y: dy * 0.00005 };
-      const pelvisForce = { x: dx * 0.00003, y: dy * 0.00003 };
+
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const nx = dx / dist;
+      const ny = dy / dist;
+
+      const FOLLOW_FORCE = 0.0012; // Force fixe — stable, pas d'accélération
+
+      const headForce = { x: nx * FOLLOW_FORCE, y: ny * FOLLOW_FORCE };
+      const chestForce = { x: nx * FOLLOW_FORCE * 0.4, y: ny * FOLLOW_FORCE * 0.4 };
+      const pelvisForce = { x: nx * FOLLOW_FORCE * 0.25, y: ny * FOLLOW_FORCE * 0.25 };
+
       Matter.Body.applyForce(b.head, b.head.position, headForce);
       Matter.Body.applyForce(b.chest, b.chest.position, chestForce);
       Matter.Body.applyForce(b.pelvis, b.pelvis.position, pelvisForce);
@@ -167,4 +178,3 @@ wss.on("connection", (ws) => {
     if (room.players.length === 0) room.closed = true;
   });
 });
-
