@@ -36,13 +36,14 @@ function findAvailableRoom() {
 
 // === Création du stickman physique ===
 function createStickman(x, y, color, world) {
-  const head = Matter.Bodies.circle(x, y, 10, { density: 0.001, restitution: 0.4 });
-  const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { density: 0.002 });
-  const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, { density: 0.002 });
-  const armL = Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { density: 0.001 });
-  const armR = Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { density: 0.001 });
-  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { density: 0.002 });
-  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { density: 0.002 });
+  // Densités augmentées pour rendre les stickmen plus lourds
+  const head = Matter.Bodies.circle(x, y, 10, { density: 0.004, restitution: 0.4 });
+  const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { density: 0.006 });
+  const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, { density: 0.006 });
+  const armL = Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { density: 0.004 });
+  const armR = Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { density: 0.004 });
+  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { density: 0.006 });
+  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { density: 0.006 });
 
   const parts = [head, chest, pelvis, armL, armR, legL, legR];
   Matter.World.add(world, parts);
@@ -157,5 +158,4 @@ wss.on("connection", (ws) => {
     if (room.players.length === 0) room.closed = true;
   });
 });
-
 
