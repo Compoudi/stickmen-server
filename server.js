@@ -36,33 +36,46 @@ function findAvailableRoom() {
 
 // === Création du stickman physique ===
 function createStickman(x, y, color, world) {
-  // 🧍 Stickman léger mais avec bras visibles et stables
-  const head = Matter.Bodies.circle(x, y, 10, { density: 0.0015, restitution: 0.4 });
-  const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { density: 0.0025 });
-  const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, { density: 0.0025 });
+  const head = Matter.Bodies.circle(x, y, 10, { density: 0.0025, restitution: 0.4 });
+  const chest = Matter.Bodies.rectangle(x, y + 30, 15, 25, { density: 0.004 });
+  const pelvis = Matter.Bodies.rectangle(x, y + 60, 15, 20, { density: 0.004 });
 
-  // 💪 Bras plus longs et un peu plus lourds (pour bien apparaître)
-  const armL = Matter.Bodies.rectangle(x - 30, y + 30, 25, 6, { density: 0.002 });
-  const armR = Matter.Bodies.rectangle(x + 30, y + 30, 25, 6, { density: 0.002 });
+  // Bras gauches et droits avec avant-bras + mains
+  const upperArmL = Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { density: 0.002 });
+  const foreArmL  = Matter.Bodies.rectangle(x - 40, y + 30, 20, 5, { density: 0.002 });
+  const handL     = Matter.Bodies.circle(x - 50, y + 30, 4, { density: 0.001 });
 
-  // 🦵 Jambes inchangées
-  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 6, 28, { density: 0.0025 });
-  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 6, 28, { density: 0.0025 });
+  const upperArmR = Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { density: 0.002 });
+  const foreArmR  = Matter.Bodies.rectangle(x + 40, y + 30, 20, 5, { density: 0.002 });
+  const handR     = Matter.Bodies.circle(x + 50, y + 30, 4, { density: 0.001 });
 
-  const parts = [head, chest, pelvis, armL, armR, legL, legR];
+  // Jambes
+  const legL = Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { density: 0.004 });
+  const legR = Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { density: 0.004 });
+
+  const parts = [
+    head, chest, pelvis,
+    upperArmL, foreArmL, handL,
+    upperArmR, foreArmR, handR,
+    legL, legR
+  ];
   Matter.World.add(world, parts);
 
-  // 🔗 Contraintes entre les parties
+  // Contraintes (liaisons)
   const constraints = [
-    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.6 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.6 }),
+    Matter.Constraint.create({ bodyA: head, bodyB: chest, length: 30, stiffness: 0.5 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: pelvis, length: 30, stiffness: 0.5 }),
 
-    // Bras attachés un peu plus rigides
-    Matter.Constraint.create({ bodyA: chest, bodyB: armL, length: 30, stiffness: 0.7 }),
-    Matter.Constraint.create({ bodyA: chest, bodyB: armR, length: 30, stiffness: 0.7 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: upperArmL, length: 25, stiffness: 0.5 }),
+    Matter.Constraint.create({ bodyA: upperArmL, bodyB: foreArmL, length: 20, stiffness: 0.5 }),
+    Matter.Constraint.create({ bodyA: foreArmL, bodyB: handL, length: 10, stiffness: 0.5 }),
 
-    Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 28, stiffness: 0.6 }),
-    Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 28, stiffness: 0.6 }),
+    Matter.Constraint.create({ bodyA: chest, bodyB: upperArmR, length: 25, stiffness: 0.5 }),
+    Matter.Constraint.create({ bodyA: upperArmR, bodyB: foreArmR, length: 20, stiffness: 0.5 }),
+    Matter.Constraint.create({ bodyA: foreArmR, bodyB: handR, length: 10, stiffness: 0.5 }),
+
+    Matter.Constraint.create({ bodyA: pelvis, bodyB: legL, length: 25, stiffness: 0.5 }),
+    Matter.Constraint.create({ bodyA: pelvis, bodyB: legR, length: 25, stiffness: 0.5 }),
   ];
 
   Matter.World.add(world, constraints);
@@ -70,7 +83,12 @@ function createStickman(x, y, color, world) {
   return {
     color,
     hp: 100,
-    bodies: { head, chest, pelvis, armL, armR, legL, legR },
+    bodies: {
+      head, chest, pelvis,
+      armL: upperArmL, foreArmL, handL,
+      armR: upperArmR, foreArmR, handR,
+      legL, legR
+    },
   };
 }
 
@@ -85,7 +103,11 @@ function serializeStickman(s) {
       chest: b.chest.position,
       pelvis: b.pelvis.position,
       armL: b.armL.position,
+      foreArmL: b.foreArmL.position,
+      handL: b.handL.position,
       armR: b.armR.position,
+      foreArmR: b.foreArmR.position,
+      handR: b.handR.position,
       legL: b.legL.position,
       legR: b.legR.position,
       footL: { x: b.legL.position.x, y: b.legL.position.y + 15 },
@@ -110,11 +132,10 @@ setInterval(() => {
       const dy = p.pointer.y - head.position.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
 
-      // Force dynamique : forte si loin, douce si proche
-      const base = 0.0000025;
-      const forceMultiplier = Math.min(distance * base, 0.00008);
-
+      const base = 0.0000015;
+      const forceMultiplier = Math.min(distance * base, 0.00006);
       const force = { x: dx * forceMultiplier, y: dy * forceMultiplier };
+
       Matter.Body.applyForce(head, head.position, force);
     }
 
@@ -155,17 +176,15 @@ wss.on("connection", (ws) => {
     const player = room.players.find((p) => p.ws === ws);
     if (!player) return;
 
-    if (data.type === "pointerMove" && player.stickman) {
+    if (data.type === "pointerMove" && player.stickman)
       player.pointer = data.pointer;
-    }
 
     if (data.type === "exitGame") {
       console.log(`🚪 Fermeture de ${room.id}`);
       room.closed = true;
-      for (const pl of room.players) {
+      for (const pl of room.players)
         if (pl.ws.readyState === 1)
           pl.ws.send(JSON.stringify({ type: "goToMenu" }));
-      }
     }
   });
 
