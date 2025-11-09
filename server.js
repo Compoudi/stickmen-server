@@ -4,7 +4,7 @@ import Matter from "matter-js";
 const wss = new WebSocketServer({ port: 3000 });
 console.log("✅ Serveur Stickmen Physique lancé sur ws://localhost:3000");
 
-let rooms = {}; // { roomId: { engine, world, players, closed } }
+let rooms = {};
 
 // === Création d'une nouvelle room ===
 function createRoom() {
@@ -13,6 +13,7 @@ function createRoom() {
   const world = engine.world;
   world.gravity.y = 1.2;
 
+  // Sol
   const ground = Matter.Bodies.rectangle(400, 580, 800, 40, {
     isStatic: true,
     label: "ground",
@@ -21,25 +22,72 @@ function createRoom() {
 
   const room = { id, engine, world, players: [], closed: false };
   rooms[id] = room;
-  console.log(`🆕 Nouvelle room créée: ${id}`);
+
+  // 💥 Événement de collision pour les dégâts
+  Matter.Events.on(engine, "collisionStart", (event) => {
+    for (const pair of event.pairs) {
+      const { bodyA, bodyB } = pair;
+      const aOwner = bodyA.plugin?.ownerId;
+      const bOwner = bodyB.plugin?.ownerId;
+      if (!aOwner || !bOwner || aOwner === bOwner) continue; // éviter self-hit
+
+      const room = Object.values(rooms).find(r =>
+        r.players.some(p => p.id === aOwner || p.id === bOwner)
+      );
+      if (!room || room.closed) continue;
+
+      const players = room.players;
+      const attacker = players.find(p => p.id === aOwner);
+      const target = players.find(p => p.id === bOwner);
+
+      if (!attacker || !target || !target.stickman) continue;
+
+      const hitParts = [bodyA.label, bodyB.label];
+      const isHeadHit = hitParts.includes("head");
+      const isStrike =
+        hitParts.some(l => ["handL", "handR", "footL", "footR", "legL", "legR"].includes(l));
+
+      if (isHeadHit && isStrike) {
+        const vA = Matter.Vector.magnitude(bodyA.velocity);
+        const vB = Matter.Vector.magnitude(bodyB.velocity);
+        const impact = (vA + vB) / 2;
+        const dmg = Math.min(impact * 10, 20);
+
+        if (dmg > 1 && target.stickman.hp > 0) {
+          target.stickman.hp = Math.max(target.stickman.hp - dmg, 0);
+          console.log(`💥 ${attacker.id} frappe ${target.id} (-${dmg.toFixed(1)} HP)`);
+
+          // Fin de match : si un joueur tombe à 0 HP
+          if (target.stickman.hp <= 0 && !room.closed) {
+            console.log(`🏁 ${target.id} est K.O. — fermeture de ${room.id}`);
+            room.closed = true;
+            for (const pl of room.players)
+              if (pl.ws.readyState === 1)
+                pl.ws.send(JSON.stringify({ type: "goToMenu" }));
+
+            setTimeout(() => {
+              delete rooms[room.id];
+              console.log(`🗑️ Room ${room.id} supprimée`);
+            }, 5000);
+          }
+        }
+      }
+    }
+  });
+
   return id;
 }
 
-// === Trouver une room libre ===
+// === Recherche d'une room libre ===
 function findAvailableRoom() {
   for (const id in rooms) {
-    const room = rooms[id];
-    // 🔒 On supprime les rooms fermées du dictionnaire
-    if (room.closed) {
+    const r = rooms[id];
+    if (r.closed) {
       delete rooms[id];
       continue;
     }
-    // ✅ On ne renvoie que les rooms valides
-    if (room.players.length < 2 && !room.closed) {
-      return id;
-    }
+    if (r.players.length < 2 && !r.closed) return id;
   }
-  // 🆕 Si aucune room dispo → on en crée une nouvelle
   return createRoom();
 }
 
@@ -90,7 +138,7 @@ function createStickman(x, y, color, world, ownerId) {
   };
 }
 
-// === Simulation physique et envoi des états ===
+// === Simulation physique ===
 setInterval(() => {
   for (const id in rooms) {
     const room = rooms[id];
@@ -98,7 +146,6 @@ setInterval(() => {
 
     Matter.Engine.update(room.engine, 1000 / 60);
 
-    // Attire la tête du joueur vers son pointeur
     for (const p of room.players) {
       const head = p.stickman.bodies.head;
       const dx = p.pointer.x - head.position.x;
@@ -108,15 +155,14 @@ setInterval(() => {
       Matter.Body.applyForce(head, head.position, { x: dx * f, y: dy * f });
     }
 
-    // Envoi de l’état
+    // Envoi des états
     const state = {};
-    for (const p of room.players) {
+    for (const p of room.players)
       state[p.id] = {
         color: p.stickman.color,
         hp: p.stickman.hp,
         parts: Object.fromEntries(Object.entries(p.stickman.bodies).map(([k, v]) => [k, v.position])),
       };
-    }
 
     const payload = JSON.stringify({ type: "state", players: state });
     for (const p of room.players)
@@ -126,11 +172,9 @@ setInterval(() => {
 
 // === WebSocket principal ===
 wss.on("connection", (ws) => {
-  // 🔍 On cherche une room encore active
   const roomId = findAvailableRoom();
   const room = rooms[roomId];
 
-  // 🚫 Vérifie si la room est déjà fermée
   if (!room || room.closed) {
     ws.send(JSON.stringify({ type: "roomClosed" }));
     ws.close(1000, "Room closed");
@@ -145,10 +189,9 @@ wss.on("connection", (ws) => {
   room.players.push(player);
   ws.roomId = roomId;
 
-  console.log(`👤 Joueur ${id} connecté dans ${roomId} (${color})`);
+  console.log(`👤 Joueur ${id} connecté (${color}) dans ${roomId}`);
   ws.send(JSON.stringify({ type: "init", id, color }));
 
-  // === Messages WebSocket ===
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
     const r = rooms[ws.roomId];
@@ -159,32 +202,26 @@ wss.on("connection", (ws) => {
 
     if (data.type === "pointerMove") player.pointer = data.pointer;
 
-    // 🚪 Quitter la partie → ferme définitivement la room
     if (data.type === "exitGame") {
-      console.log(`🚪 Room ${r.id} fermée définitivement par ${player.id}`);
+      console.log(`🚪 Room ${r.id} fermée manuellement`);
       r.closed = true;
-
-      // Préviens tous les joueurs connectés
       for (const pl of r.players)
         if (pl.ws.readyState === 1)
           pl.ws.send(JSON.stringify({ type: "goToMenu" }));
-
-      // 🔥 Nettoie la room après 5s
       setTimeout(() => {
         delete rooms[r.id];
-        console.log(`🗑️ Room ${r.id} supprimée de la mémoire`);
+        console.log(`🗑️ Room ${r.id} supprimée`);
       }, 5000);
     }
   });
 
-  // === Fermeture de connexion ===
   ws.on("close", () => {
     const r = rooms[ws.roomId];
     if (!r) return;
     r.players = r.players.filter((p) => p.ws !== ws);
     if (r.players.length === 0) {
       r.closed = true;
-      console.log(`🏁 Room ${r.id} automatiquement fermée (tous partis)`);
+      console.log(`🏁 Room ${r.id} fermée (déconnexion)`);
     }
   });
 });
