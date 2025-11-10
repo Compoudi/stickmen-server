@@ -61,14 +61,17 @@ function initWebSocket(scene) {
       }
     }
 
+    // Correction : retour au menu sans afficher de bouton
     if (data.type === "goToMenu" || data.type === "roomClosed") {
       console.log("📩 Retour au menu principal reçu !");
+      const btn = document.getElementById("exit-btn");
+      if (btn) btn.remove();
       endGameAndReturn(scene);
     }
   };
 }
 
-// === Fonction pour revenir proprement au menu ===
+// === Retour propre au menu ===
 function endGameAndReturn(scene) {
   gameEnded = true;
   try { if (ws) ws.close(); } catch (e) {}
@@ -98,15 +101,13 @@ class MenuScene extends Phaser.Scene {
       color: "#000",
     }).setOrigin(0.5);
 
-    const startText = this.add.text(400, 320, "Appuyez sur ESPACE pour démarrer", {
+    this.add.text(400, 320, "Appuyez sur ESPACE pour démarrer", {
       font: "20px Arial",
       color: "#333",
     }).setOrigin(0.5);
 
     this.input.keyboard.on("keydown-SPACE", () => {
-      if (gameEnded) {
-        gameEnded = false;
-      }
+      if (gameEnded) gameEnded = false;
       console.log("🎮 Nouvelle partie lancée...");
       this.scene.start("StickmenScene");
     });
@@ -147,6 +148,7 @@ class StickmenScene extends Phaser.Scene {
 
   // === Bouton Exit ===
   showExitButton() {
+    // Empêche les doublons
     if (document.getElementById("exit-btn")) return;
 
     const btn = document.createElement("button");
@@ -173,6 +175,7 @@ class StickmenScene extends Phaser.Scene {
     btn.onclick = () => {
       console.log("🚪 Exit → retour au menu principal");
 
+      // Envoyer au serveur
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "exitGame" }));
         ws.close(1000, "Exit to menu");
@@ -185,6 +188,7 @@ class StickmenScene extends Phaser.Scene {
     console.log("✅ Bouton Exit ajouté");
   }
 
+  // === Dessin du stickman ===
   drawStickman(player, color) {
     const b = player.parts;
     const g = this.graphics;
@@ -228,6 +232,7 @@ class StickmenScene extends Phaser.Scene {
   }
 }
 
+// === Initialisation Phaser ===
 new Phaser.Game({
   type: Phaser.AUTO,
   width: 800,
