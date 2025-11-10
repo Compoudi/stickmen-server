@@ -1,13 +1,13 @@
-// === 🧠 Serveur Stickmen Physique — version FINALE (room non rejoignable après quit) ===
+// === 🧠 Serveur Stickmen Physique — version finale anti-room réutilisation ===
 import { WebSocketServer } from "ws";
 import Matter from "matter-js";
 
 const wss = new WebSocketServer({ port: 3000 });
 console.log("✅ Serveur Stickmen lancé sur ws://localhost:3000");
 
-let rooms = {}; // { id, engine, world, players, closed }
+let rooms = {}; // { id, engine, world, players, closed, locked }
 
-// === Création d’une room ===
+// === Création d’une nouvelle room ===
 function createRoom() {
   const id = "room-" + Math.random().toString(36).substr(2, 6);
   const engine = Matter.Engine.create();
@@ -20,7 +20,7 @@ function createRoom() {
   });
   Matter.World.add(world, ground);
 
-  const room = { id, engine, world, players: [], closed: false };
+  const room = { id, engine, world, players: [], closed: false, locked: false };
   rooms[id] = room;
 
   Matter.Events.on(engine, "collisionStart", (event) => handleCollisions(room, event));
@@ -28,7 +28,7 @@ function createRoom() {
   return id;
 }
 
-// === Dégâts par collisions ===
+// === Collisions et dégâts ===
 function handleCollisions(room, event) {
   for (const pair of event.pairs) {
     const { bodyA, bodyB } = pair;
@@ -55,34 +55,33 @@ function handleCollisions(room, event) {
   }
 }
 
-// === Trouver une room libre ===
+// === Recherche d’une room libre ===
 function findAvailableRoom() {
-  // ⚠️ Nettoyage des rooms fermées
+  // Nettoyage des rooms fermées
   for (const id in rooms) {
     const r = rooms[id];
-    if (r.closed) {
+    if (r.closed || r.locked) {
+      console.log(`🧹 Room supprimée (fermée ou verrouillée): ${id}`);
       delete rooms[id];
-      continue;
     }
   }
 
-  // 🔍 Rechercher une room encore ouverte avec un seul joueur
+  // Trouver une room ouverte avec moins de 2 joueurs
   for (const id in rooms) {
     const r = rooms[id];
-    if (!r.closed && r.players.length < 2) {
+    if (!r.closed && !r.locked && r.players.length < 2) {
       console.log(`🎯 Room disponible trouvée: ${id}`);
       return id;
     }
   }
 
-  // sinon créer une nouvelle
+  // Sinon, créer une nouvelle
   return createRoom();
 }
 
-// === Création d’un stickman ===
+// === Création stickman ===
 function createStickman(x, y, color, world, ownerId) {
   const add = (b) => { b.plugin = { ownerId }; return b; };
-
   const head = add(Matter.Bodies.circle(x, y, 10, { restitution: 0.4, label: "head" }));
   const chest = add(Matter.Bodies.rectangle(x, y + 30, 15, 25, { label: "chest" }));
   const pelvis = add(Matter.Bodies.rectangle(x, y + 60, 15, 20, { label: "pelvis" }));
@@ -127,7 +126,6 @@ setInterval(() => {
     if (!room || room.closed) continue;
     Matter.Engine.update(room.engine, 1000 / 60);
 
-    // Déplacement vers le pointeur
     for (const p of room.players) {
       const head = p.stickman.bodies.head;
       const dx = p.pointer.x - head.position.x;
@@ -168,7 +166,7 @@ wss.on("connection", (ws) => {
 
     if (data.type === "pointerMove") player.pointer = data.pointer;
 
-    // 🚪 Exit individuel
+    // 🚪 EXIT INDIVIDUEL
     if (data.type === "exitGame") {
       console.log(`🚪 ${player.id} quitte ${roomId}`);
       try {
@@ -176,21 +174,22 @@ wss.on("connection", (ws) => {
         ws.close();
       } catch {}
 
-      // Supprimer le stickman du monde
+      // Retirer le stickman
       Matter.World.remove(room.world, Object.values(player.stickman.bodies));
       room.players = room.players.filter(p => p.id !== player.id);
 
-      // Annoncer aux autres clients pour suppression du stickman
+      // Annoncer aux autres joueurs (stickman disparu)
       for (const p of room.players) {
         if (p.ws.readyState === 1)
           p.ws.send(JSON.stringify({ type: "playerLeft", id: player.id }));
       }
 
-      // 🚫 Room marquée comme "fermée à la réouverture"
-      room.closed = true;
+      // 🚫 Verrouiller cette room (non rejoignable à nouveau)
+      room.locked = true;
 
-      // Si vide, suppression totale
+      // Si vide → supprimer
       if (room.players.length === 0) {
+        room.closed = true;
         delete rooms[roomId];
         console.log(`❌ Room ${roomId} supprimée (vide)`);
       }
@@ -202,6 +201,7 @@ wss.on("connection", (ws) => {
     if (!room) return;
     room.players = room.players.filter(p => p.ws !== ws);
     if (room.players.length === 0) {
+      room.closed = true;
       delete rooms[roomId];
       console.log(`❌ Room ${roomId} supprimée (vide)`);
     }
