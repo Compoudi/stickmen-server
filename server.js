@@ -1,4 +1,4 @@
-// === 🧠 Serveur Stickmen Physique — version avec collisions réparées ===
+// === 🧠 Serveur Stickmen Physique — version DEBUG COLLISIONS ===
 import { WebSocketServer } from "ws";
 import Matter from "matter-js";
 
@@ -24,45 +24,51 @@ function createRoom() {
   const room = { id, engine, world, players: [], closed: false };
   rooms[id] = room;
 
-  // === Attacher les collisions ===
-  Matter.Events.on(engine, "collisionStart", (event) => handleCollisions(room, event));
+  // === DEBUG collisions ===
+  Matter.Events.on(engine, "collisionStart", (event) => {
+    if (room.closed) return;
+    if (event.pairs.length > 0) {
+      console.log(`⚡ Collision détectée dans ${id} (${event.pairs.length} paire${event.pairs.length > 1 ? "s" : ""})`);
+    }
+
+    // --- DÉGÂTS réels ---
+    for (const pair of event.pairs) {
+      const { bodyA, bodyB } = pair;
+      const aOwner = bodyA.plugin?.ownerId;
+      const bOwner = bodyB.plugin?.ownerId;
+      if (!aOwner || !bOwner || aOwner === bOwner) continue;
+
+      const attacker = room.players.find(p => p.id === aOwner);
+      const target = room.players.find(p => p.id === bOwner);
+      if (!attacker || !target || !target.stickman) continue;
+
+      const hitBody = [bodyA.label, bodyB.label];
+      const isLimb = hitBody.some(l => ["handL","handR","footL","footR","legL","legR"].includes(l));
+      const isHead = hitBody.includes("head");
+
+      if (isLimb && isHead) {
+        const impact = (Matter.Vector.magnitude(bodyA.velocity) + Matter.Vector.magnitude(bodyB.velocity)) / 2;
+        const dmg = Math.min(impact * 12, 20);
+        if (dmg > 1) {
+          target.stickman.hp = Math.max(target.stickman.hp - dmg, 0);
+          console.log(`💥 ${attacker.id} frappe ${target.id} (-${dmg.toFixed(1)} HP)`);
+        }
+      }
+    }
+  });
 
   console.log(`🆕 Nouvelle room créée: ${id}`);
   return id;
 }
 
-// === Gestion des collisions et dégâts ===
-function handleCollisions(room, event) {
-  for (const pair of event.pairs) {
-    const { bodyA, bodyB } = pair;
-    const aOwner = bodyA.plugin?.ownerId;
-    const bOwner = bodyB.plugin?.ownerId;
-    if (!aOwner || !bOwner || aOwner === bOwner) continue;
-
-    if (room.closed) return;
-    const attacker = room.players.find(p => p.id === aOwner);
-    const target = room.players.find(p => p.id === bOwner);
-    if (!attacker || !target || !target.stickman) continue;
-
-    const hitBody = [bodyA.label, bodyB.label];
-    const isLimb = hitBody.some(l => ["handL","handR","footL","footR","legL","legR"].includes(l));
-    const isHead = hitBody.includes("head");
-
-    if (isLimb && isHead) {
-      const impact = (Matter.Vector.magnitude(bodyA.velocity) + Matter.Vector.magnitude(bodyB.velocity)) / 2;
-      const dmg = Math.min(impact * 12, 20);
-      if (dmg > 1) {
-        target.stickman.hp = Math.max(target.stickman.hp - dmg, 0);
-        console.log(`💥 ${attacker.id} frappe ${target.id} (-${dmg.toFixed(1)} HP)`);
-      }
-    }
-  }
-}
-
-// === Trouver ou créer une room ===
+// === Trouver ou créer une room disponible ===
 function findAvailableRoom() {
   for (const id in rooms) {
-    if (rooms[id].closed) delete rooms[id];
+    const r = rooms[id];
+    if (r.closed) {
+      console.log(`🧹 Suppression de ${id} (fermée)`);
+      delete rooms[id];
+    }
   }
 
   for (const id in rooms) {
@@ -109,7 +115,7 @@ function createStickman(x, y, color, world, ownerId) {
   return { color, hp: 100, bodies: { head, chest, pelvis, armL, handL, armR, handR, legL, legR, footL, footR } };
 }
 
-// === Sérialisation ===
+// === Sérialisation du stickman ===
 function serializeStickman(s) {
   const b = s.bodies;
   return {
@@ -119,13 +125,14 @@ function serializeStickman(s) {
   };
 }
 
-// === Simulation physique ===
+// === Boucle physique ===
 setInterval(() => {
   for (const id in rooms) {
     const room = rooms[id];
     if (!room || room.closed) continue;
     Matter.Engine.update(room.engine, 1000 / 60);
 
+    // Suivi du pointeur
     for (const p of room.players) {
       const head = p.stickman.bodies.head;
       const dx = p.pointer.x - head.position.x;
@@ -135,6 +142,7 @@ setInterval(() => {
       Matter.Body.applyForce(head, head.position, { x: dx * f, y: dy * f });
     }
 
+    // Envoi de l’état
     const state = {};
     for (const p of room.players) state[p.id] = serializeStickman(p.stickman);
     const payload = JSON.stringify({ type: "state", players: state });
@@ -143,7 +151,7 @@ setInterval(() => {
   }
 }, 1000 / 30);
 
-// === WebSocket ===
+// === Connexions WebSocket ===
 wss.on("connection", (ws) => {
   const roomId = findAvailableRoom();
   const room = rooms[roomId];
