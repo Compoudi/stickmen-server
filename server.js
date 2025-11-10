@@ -1,243 +1,191 @@
-window.addEventListener("load", () => {
-  if (window.CrazyGames) {
-    const crazySDK = window.CrazyGames.CrazySDK.getInstance();
-    crazySDK.init();
-    crazySDK.gameplayStart();
-    console.log("CrazyGames SDK initialisé ✅");
-  } else {
-    console.log("⚠️ CrazyGames SDK non détecté (test local).");
-  }
-});
+// === 🧠 Serveur Stickmen Physique — version "Exit individuel" ===
+import { WebSocketServer } from "ws";
+import Matter from "matter-js";
 
-let ws = null;
-let wsConnected = false;
-let id, color;
-let players = {};
-let pointer = { x: 400, y: 300 };
-let currentScene = null;
-let gameEnded = false;
+const wss = new WebSocketServer({ port: 3000 });
+console.log("✅ Serveur Stickmen lancé sur ws://localhost:3000");
 
-// === 🔗 Initialisation WebSocket ===
-function initWebSocket(scene) {
-  if (gameEnded) {
-    console.warn("🚫 Partie terminée — création d’une nouvelle partie requise.");
-    alert("Cette partie est terminée. Relancez une nouvelle partie depuis le menu.");
-    return;
-  }
+let rooms = {}; // { id, engine, world, players, closed }
 
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    console.warn("⚠️ WebSocket déjà connecté.");
-    return;
-  }
+// === Création d’une room ===
+function createRoom() {
+  const id = "room-" + Math.random().toString(36).substr(2, 6);
+  const engine = Matter.Engine.create();
+  const world = engine.world;
+  world.gravity.y = 1.2;
 
-  try { if (ws) ws.close(); } catch (e) {}
-  ws = new WebSocket("wss://stickmen-server.onrender.com");
-  wsConnected = true;
+  const ground = Matter.Bodies.rectangle(400, 580, 800, 40, {
+    isStatic: true,
+    label: "ground",
+  });
+  Matter.World.add(world, ground);
 
-  ws.onopen = () => console.log("🌐 WebSocket connecté");
-  ws.onclose = () => {
-    console.log("🔌 WebSocket fermé");
-    wsConnected = false;
-  };
-  ws.onerror = (e) => console.error("⚠️ Erreur WebSocket:", e);
+  const room = { id, engine, world, players: [], closed: false };
+  rooms[id] = room;
 
-  ws.onmessage = (msg) => {
-    const data = JSON.parse(msg.data);
-    if (!scene) return;
+  // === Gestion des collisions ===
+  Matter.Events.on(engine, "collisionStart", (event) => handleCollisions(room, event));
 
-    if (data.type === "init") {
-      id = data.id;
-      color = data.color;
-      console.log("👤 Joueur initialisé:", id, color);
-    }
+  console.log(`🆕 Nouvelle room créée: ${id}`);
+  return id;
+}
 
-    if (data.type === "state") {
-      players = data.players;
-      const anyoneKO = Object.values(players).some(p => p.hp <= 0);
-      if (anyoneKO && !scene.exitButtonShown) {
-        console.log("🏁 Fin du match — affichage du bouton Exit");
-        scene.exitButtonShown = true;
-        scene.showExitButton();
+// === Dégâts par collision ===
+function handleCollisions(room, event) {
+  for (const pair of event.pairs) {
+    const { bodyA, bodyB } = pair;
+    const aOwner = bodyA.plugin?.ownerId;
+    const bOwner = bodyB.plugin?.ownerId;
+    if (!aOwner || !bOwner || aOwner === bOwner) continue;
+    if (room.closed) return;
+
+    const attacker = room.players.find(p => p.id === aOwner);
+    const target = room.players.find(p => p.id === bOwner);
+    if (!attacker || !target || !target.stickman) continue;
+
+    const hitBody = [bodyA.label, bodyB.label];
+    const isLimb = hitBody.some(l => ["handL","handR","footL","footR","legL","legR"].includes(l));
+    const isHead = hitBody.includes("head");
+
+    if (isLimb && isHead) {
+      const impact = (Matter.Vector.magnitude(bodyA.velocity) + Matter.Vector.magnitude(bodyB.velocity)) / 2;
+      const dmg = Math.min(impact * 12, 20);
+      if (dmg > 1) {
+        target.stickman.hp = Math.max(target.stickman.hp - dmg, 0);
+        console.log(`💥 ${attacker.id} frappe ${target.id} (-${dmg.toFixed(1)} HP)`);
       }
     }
+  }
+}
 
-    // Correction : retour au menu sans afficher de bouton
-    if (data.type === "goToMenu" || data.type === "roomClosed") {
-      console.log("📩 Retour au menu principal reçu !");
-      const btn = document.getElementById("exit-btn");
-      if (btn) btn.remove();
-      endGameAndReturn(scene);
-    }
+// === Trouver une room ouverte ===
+function findAvailableRoom() {
+  for (const id in rooms) {
+    const r = rooms[id];
+    if (r.closed) delete rooms[id];
+  }
+
+  for (const id in rooms) {
+    const r = rooms[id];
+    if (!r.closed && r.players.length < 2) return id;
+  }
+
+  return createRoom();
+}
+
+// === Création d’un stickman ===
+function createStickman(x, y, color, world, ownerId) {
+  const add = (b) => { b.plugin = { ownerId }; return b; };
+
+  const head = add(Matter.Bodies.circle(x, y, 10, { restitution: 0.4, label: "head" }));
+  const chest = add(Matter.Bodies.rectangle(x, y + 30, 15, 25, { label: "chest" }));
+  const pelvis = add(Matter.Bodies.rectangle(x, y + 60, 15, 20, { label: "pelvis" }));
+  const armL = add(Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { label: "armL" }));
+  const handL = add(Matter.Bodies.circle(x - 40, y + 30, 4, { label: "handL" }));
+  const armR = add(Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { label: "armR" }));
+  const handR = add(Matter.Bodies.circle(x + 40, y + 30, 4, { label: "handR" }));
+  const legL = add(Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { label: "legL" }));
+  const footL = add(Matter.Bodies.circle(x - 10, y + 100, 5, { label: "footL" }));
+  const legR = add(Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { label: "legR" }));
+  const footR = add(Matter.Bodies.circle(x + 10, y + 100, 5, { label: "footR" }));
+
+  const parts = [head, chest, pelvis, armL, handL, armR, handR, legL, legR, footL, footR];
+  Matter.World.add(world, parts);
+
+  const c = (a, b, len = 25) => Matter.Constraint.create({ bodyA: a, bodyB: b, length: len, stiffness: 0.5 });
+  Matter.World.add(world, [
+    c(head, chest, 30), c(chest, pelvis, 30),
+    c(chest, armL, 25), c(armL, handL, 15),
+    c(chest, armR, 25), c(armR, handR, 15),
+    c(pelvis, legL, 25), c(legL, footL, 10),
+    c(pelvis, legR, 25), c(legR, footR, 10),
+  ]);
+
+  return { color, hp: 100, bodies: { head, chest, pelvis, armL, handL, armR, handR, legL, legR, footL, footR } };
+}
+
+function serializeStickman(s) {
+  const b = s.bodies;
+  return {
+    color: s.color,
+    hp: s.hp,
+    parts: Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v.position])),
   };
 }
 
-// === Retour propre au menu ===
-function endGameAndReturn(scene) {
-  gameEnded = true;
-  try { if (ws) ws.close(); } catch (e) {}
-  ws = null;
-  wsConnected = false;
-  players = {};
-  id = null;
-  color = null;
-  pointer = { x: 400, y: 300 };
+// === Boucle de simulation ===
+setInterval(() => {
+  for (const id in rooms) {
+    const room = rooms[id];
+    if (!room || room.closed) continue;
+    Matter.Engine.update(room.engine, 1000 / 60);
 
-  const btn = document.getElementById("exit-btn");
-  if (btn) btn.remove();
-
-  if (scene.scene.isActive("StickmenScene")) {
-    scene.scene.stop("StickmenScene");
-    scene.scene.start("MenuScene");
-  }
-}
-
-// === 🏠 SCÈNE MENU ===
-class MenuScene extends Phaser.Scene {
-  constructor() { super({ key: "MenuScene" }); }
-
-  create() {
-    this.add.text(400, 200, "🏠 Menu Principal", {
-      font: "40px Arial",
-      color: "#000",
-    }).setOrigin(0.5);
-
-    this.add.text(400, 320, "Appuyez sur ESPACE pour démarrer", {
-      font: "20px Arial",
-      color: "#333",
-    }).setOrigin(0.5);
-
-    this.input.keyboard.on("keydown-SPACE", () => {
-      if (gameEnded) gameEnded = false;
-      console.log("🎮 Nouvelle partie lancée...");
-      this.scene.start("StickmenScene");
-    });
-  }
-}
-
-// === ⚔️ SCÈNE COMBAT ===
-class StickmenScene extends Phaser.Scene {
-  constructor() { super({ key: "StickmenScene" }); }
-
-  create() {
-    currentScene = this;
-    this.graphics = this.add.graphics();
-    this.hpTexts = {};
-    this.exitButtonShown = false;
-
-    initWebSocket(this);
-
-    this.input.on("pointermove", (p) => {
-      pointer = { x: p.x, y: p.y };
-      const me = players[id];
-      if (!me || me.hp <= 0) return;
-      if (ws && ws.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({ type: "pointerMove", pointer }));
-    });
-  }
-
-  update() {
-    this.graphics.clear();
-
-    for (const pid in players) {
-      const player = players[pid];
-      if (!player.parts || !player.parts.head) continue;
-      const col = player.color === "black" ? 0x000000 : 0xff0000;
-      this.drawStickman(player, col);
+    // Physique des têtes vers le pointeur
+    for (const p of room.players) {
+      const head = p.stickman.bodies.head;
+      const dx = p.pointer.x - head.position.x;
+      const dy = p.pointer.y - head.position.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const f = Math.min(d * 0.000002, 0.00007);
+      Matter.Body.applyForce(head, head.position, { x: dx * f, y: dy * f });
     }
+
+    // Synchronisation clients
+    const state = {};
+    for (const p of room.players) state[p.id] = serializeStickman(p.stickman);
+    const payload = JSON.stringify({ type: "state", players: state });
+    for (const p of room.players)
+      if (p.ws.readyState === 1) p.ws.send(payload);
   }
+}, 1000 / 30);
 
-  // === Bouton Exit ===
-  showExitButton() {
-    // Empêche les doublons
-    if (document.getElementById("exit-btn")) return;
+// === WebSocket principal ===
+wss.on("connection", (ws) => {
+  const roomId = findAvailableRoom();
+  const room = rooms[roomId];
+  const id = Math.random().toString(36).substr(2, 9);
+  const color = room.players.length === 0 ? "black" : "red";
 
-    const btn = document.createElement("button");
-    btn.id = "exit-btn";
-    btn.innerText = "🚪 Quitter";
+  const stickman = createStickman(300 + room.players.length * 200, 100, color, room.world, id);
+  const player = { id, ws, stickman, pointer: { x: 400, y: 300 } };
+  room.players.push(player);
+  ws.roomId = roomId;
 
-    Object.assign(btn.style, {
-      position: "fixed",
-      top: "50%",
-      left: "50%",
-      transform: "translate(-50%, -50%)",
-      padding: "15px 40px",
-      fontSize: "22px",
-      fontWeight: "bold",
-      border: "none",
-      borderRadius: "12px",
-      background: "#d9534f",
-      color: "#fff",
-      cursor: "pointer",
-      boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-      zIndex: "10000",
-    });
+  console.log(`👤 Joueur ${id} connecté (${color}) dans ${roomId}`);
+  ws.send(JSON.stringify({ type: "init", id, color }));
 
-    btn.onclick = () => {
-      console.log("🚪 Exit → retour au menu principal");
+  ws.on("message", (msg) => {
+    const data = JSON.parse(msg);
+    const player = room.players.find(p => p.ws === ws);
+    if (!player) return;
 
-      // Envoyer au serveur
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "exitGame" }));
-        ws.close(1000, "Exit to menu");
+    if (data.type === "pointerMove") player.pointer = data.pointer;
+
+    // 🚪 EXIT — seulement pour le joueur concerné
+    if (data.type === "exitGame") {
+      console.log(`🚪 ${player.id} quitte la partie ${roomId}`);
+      try {
+        ws.send(JSON.stringify({ type: "goToMenu" })); // il retourne au menu
+        ws.close();
+      } catch {}
+      room.players = room.players.filter(p => p.id !== player.id);
+      if (room.players.length === 0) {
+        room.closed = true;
+        delete rooms[roomId];
+        console.log(`❌ Room ${roomId} supprimée (vide)`);
       }
-
-      endGameAndReturn(this);
-    };
-
-    document.body.appendChild(btn);
-    console.log("✅ Bouton Exit ajouté");
-  }
-
-  // === Dessin du stickman ===
-  drawStickman(player, color) {
-    const b = player.parts;
-    const g = this.graphics;
-    g.lineStyle(3, color);
-
-    const L = (a, b) => { if (a && b) { g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); } };
-
-    g.beginPath();
-    L(b.head, b.chest);
-    L(b.chest, b.pelvis);
-    L(b.chest, b.armL); L(b.chest, b.armR);
-    L(b.armL, b.handL); L(b.armR, b.handR);
-    L(b.pelvis, b.legL); L(b.pelvis, b.legR);
-    L(b.legL, b.footL); L(b.legR, b.footR);
-    g.strokePath();
-
-    if (b.head) g.strokeCircle(b.head.x, b.head.y, 10);
-    if (b.handL) g.strokeCircle(b.handL.x, b.handL.y, 4);
-    if (b.handR) g.strokeCircle(b.handR.x, b.handR.y, 4);
-    if (b.footL) g.strokeCircle(b.footL.x, b.footL.y, 5);
-    if (b.footR) g.strokeCircle(b.footR.x, b.footR.y, 5);
-
-    const hp = player.hp ?? 100;
-    const ratio = Phaser.Math.Clamp(hp / 100, 0, 1);
-    let barColor = 0x00ff00;
-    if (ratio < 0.5) barColor = 0xffff00;
-    if (ratio < 0.25) barColor = 0xff0000;
-
-    if (b.head) {
-      const barWidth = 40, barHeight = 6;
-      const x = b.head.x - barWidth / 2;
-      const y = b.head.y - 30;
-
-      g.fillStyle(0xaaaaaa);
-      g.fillRect(x, y, barWidth, barHeight);
-      g.fillStyle(barColor);
-      g.fillRect(x, y, barWidth * ratio, barHeight);
-      g.lineStyle(1, 0x000000);
-      g.strokeRect(x, y, barWidth, barHeight);
     }
-  }
-}
+  });
 
-// === Initialisation Phaser ===
-new Phaser.Game({
-  type: Phaser.AUTO,
-  width: 800,
-  height: 600,
-  backgroundColor: "#ffffff",
-  scene: [MenuScene, StickmenScene],
+  ws.on("close", () => {
+    const room = rooms[roomId];
+    if (!room) return;
+    room.players = room.players.filter(p => p.ws !== ws);
+    if (room.players.length === 0) {
+      room.closed = true;
+      delete rooms[roomId];
+      console.log(`❌ Room ${roomId} supprimée (vide)`);
+    }
+  });
 });
 
