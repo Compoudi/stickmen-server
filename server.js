@@ -1,11 +1,11 @@
-// === 🧠 Serveur Stickmen Physique — version corrigée ===
+// === 🧠 Serveur Stickmen Physique — version finale ===
 import { WebSocketServer } from "ws";
 import Matter from "matter-js";
 
 const wss = new WebSocketServer({ port: 3000 });
 console.log("✅ Serveur Stickmen lancé sur ws://localhost:3000");
 
-let rooms = {}; // Dictionnaire des rooms actives
+let rooms = {}; // { id, engine, world, players, closed }
 
 // === Création d’une room ===
 function createRoom() {
@@ -22,14 +22,38 @@ function createRoom() {
 
   const room = { id, engine, world, players: [], closed: false };
   rooms[id] = room;
-
-  console.log(`🆕 Room créée: ${id}`);
+  console.log(`🆕 Nouvelle room créée: ${id}`);
   return id;
 }
 
-// === Création du stickman ===
+// === Trouver une room ouverte ou en créer une ===
+function findAvailableRoom() {
+  // Nettoyer les rooms fermées
+  for (const id in rooms) {
+    const r = rooms[id];
+    if (!r || r.closed || r.players.length === 0) {
+      delete rooms[id];
+      console.log(`🧹 Room ${id} supprimée.`);
+    }
+  }
+
+  // Trouver une room ouverte avec moins de 2 joueurs
+  for (const id in rooms) {
+    const r = rooms[id];
+    if (!r.closed && r.players.length < 2) {
+      console.log(`🎯 Room disponible trouvée: ${id}`);
+      return id;
+    }
+  }
+
+  // Sinon créer une nouvelle room
+  return createRoom();
+}
+
+// === Création d’un stickman ===
 function createStickman(x, y, color, world, ownerId) {
   const add = (b) => { b.plugin = { ownerId }; return b; };
+
   const head = add(Matter.Bodies.circle(x, y, 10, { restitution: 0.4, label: "head" }));
   const chest = add(Matter.Bodies.rectangle(x, y + 30, 15, 25, { label: "chest" }));
   const pelvis = add(Matter.Bodies.rectangle(x, y + 60, 15, 20, { label: "pelvis" }));
@@ -44,6 +68,7 @@ function createStickman(x, y, color, world, ownerId) {
 
   const parts = [head, chest, pelvis, armL, handL, armR, handR, legL, legR, footL, footR];
   Matter.World.add(world, parts);
+
   const c = (a, b, len = 25) => Matter.Constraint.create({ bodyA: a, bodyB: b, length: len, stiffness: 0.5 });
   Matter.World.add(world, [
     c(head, chest, 30), c(chest, pelvis, 30),
@@ -52,6 +77,7 @@ function createStickman(x, y, color, world, ownerId) {
     c(pelvis, legL, 25), c(legL, footL, 10),
     c(pelvis, legR, 25), c(legR, footR, 10)
   ]);
+
   return { color, hp: 100, bodies: { head, chest, pelvis, armL, handL, armR, handR, legL, legR, footL, footR } };
 }
 
@@ -60,7 +86,7 @@ function serializeStickman(s) {
   return {
     color: s.color,
     hp: s.hp,
-    parts: Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v.position]))
+    parts: Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v.position])),
   };
 }
 
@@ -81,22 +107,25 @@ setInterval(() => {
     }
 
     const state = {};
-    for (const p of room.players) state[p.id] = serializeStickman(p.stickman);
+    for (const p of room.players)
+      state[p.id] = serializeStickman(p.stickman);
+
     const payload = JSON.stringify({ type: "state", players: state });
     for (const p of room.players)
-      if (p.ws.readyState === 1) p.ws.send(payload);
+      if (p.ws.readyState === 1)
+        p.ws.send(payload);
   }
 }, 1000 / 30);
 
-// === Chaque connexion crée UNE NOUVELLE ROOM ===
+// === Connexions WebSocket ===
 wss.on("connection", (ws) => {
-  // 💥 ne pas réutiliser de room
-  const roomId = createRoom();
+  const roomId = findAvailableRoom();
   const room = rooms[roomId];
-  const id = Math.random().toString(36).substr(2, 9);
-  const color = "black"; // toujours black (premier joueur de sa room)
 
-  const stickman = createStickman(400, 100, color, room.world, id);
+  const id = Math.random().toString(36).substr(2, 9);
+  const color = room.players.length === 0 ? "black" : "red";
+
+  const stickman = createStickman(300 + room.players.length * 200, 100, color, room.world, id);
   const player = { id, ws, stickman, pointer: { x: 400, y: 300 } };
   room.players.push(player);
   ws.roomId = roomId;
@@ -104,7 +133,7 @@ wss.on("connection", (ws) => {
   console.log(`👤 Joueur ${id} connecté (${color}) dans ${roomId}`);
   ws.send(JSON.stringify({ type: "init", id, color }));
 
-  // === Réception messages client ===
+  // === Messages du client ===
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
     const player = room.players.find(p => p.ws === ws);
@@ -119,12 +148,12 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
-    console.log(`🔌 Fermeture WS pour ${roomId}`);
+    console.log(`🔌 WS fermée pour ${roomId}`);
     closeRoom(roomId);
   });
 });
 
-// === Fermer et supprimer proprement une room ===
+// === Fermeture propre des rooms ===
 function closeRoom(roomId) {
   const room = rooms[roomId];
   if (!room) return;
@@ -137,6 +166,6 @@ function closeRoom(roomId) {
   }
 
   delete rooms[roomId];
-  console.log(`❌ Room ${roomId} supprimée définitivement.`);
+  console.log(`❌ Room ${roomId} supprimée.`);
 }
 
