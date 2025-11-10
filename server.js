@@ -63,12 +63,26 @@ function createRoom() {
   return id;
 }
 
+// === 🧩 Nouvelle version : ignore et supprime les rooms fermées ===
 function findAvailableRoom() {
+  // Nettoyer les rooms fermées
+  for (const id in rooms) {
+    if (rooms[id].closed) {
+      delete rooms[id];
+      console.log(`🧹 Room ${id} supprimée (fermée définitivement)`);
+    }
+  }
+
+  // Trouver une room ouverte avec <2 joueurs
   for (const id in rooms) {
     const r = rooms[id];
     if (!r.closed && r.players.length < 2) return id;
   }
-  return createRoom();
+
+  // Sinon, en créer une nouvelle
+  const newId = createRoom();
+  console.log(`🆕 Nouvelle room créée: ${newId}`);
+  return newId;
 }
 
 // === Création du stickman ===
@@ -121,14 +135,13 @@ function serializeStickman(s) {
   };
 }
 
-// === Simulation ===
+// === Simulation physique ===
 setInterval(() => {
   for (const id in rooms) {
     const room = rooms[id];
     if (room.closed) continue;
     Matter.Engine.update(room.engine, 1000 / 60);
 
-    // Force vers pointeur
     for (const p of room.players) {
       const head = p.stickman.bodies.head;
       const dx = p.pointer.x - head.position.x;
@@ -138,7 +151,6 @@ setInterval(() => {
       Matter.Body.applyForce(head, head.position, { x: dx * f, y: dy * f });
     }
 
-    // Envoi de l'état
     const state = {};
     for (const p of room.players)
       state[p.id] = serializeStickman(p.stickman);
@@ -148,7 +160,7 @@ setInterval(() => {
   }
 }, 1000 / 30);
 
-// === WebSocket ===
+// === WebSocket principal ===
 wss.on("connection", (ws) => {
   const roomId = findAvailableRoom();
   const room = rooms[roomId];
@@ -167,19 +179,28 @@ wss.on("connection", (ws) => {
     const data = JSON.parse(msg);
     const player = room.players.find(p => p.ws === ws);
     if (!player) return;
+
     if (data.type === "pointerMove") player.pointer = data.pointer;
+
     if (data.type === "exitGame") {
+      console.log(`🚪 ${player.id} quitte la partie ${roomId}`);
       room.closed = true;
+
       for (const pl of room.players)
         if (pl.ws.readyState === 1)
           pl.ws.send(JSON.stringify({ type: "goToMenu" }));
+
+      room.players = [];
+      console.log(`❌ Room ${roomId} fermée définitivement.`);
     }
   });
 
   ws.on("close", () => {
     room.players = room.players.filter(p => p.ws !== ws);
-    if (room.players.length === 0) room.closed = true;
+    if (room.players.length === 0) {
+      room.closed = true;
+      console.log(`❌ Room ${roomId} fermée (vide)`);
+    }
   });
 });
-
 
