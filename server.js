@@ -24,38 +24,31 @@ function createRoom() {
   const room = { id, engine, world, players: [], closed: false };
   rooms[id] = room;
 
-  // === Gestion des collisions ===
   Matter.Events.on(engine, "collisionStart", (event) => {
+    if (room.closed) return;
+
     for (const pair of event.pairs) {
       const { bodyA, bodyB } = pair;
       const aOwner = bodyA.plugin?.ownerId;
       const bOwner = bodyB.plugin?.ownerId;
       if (!aOwner || !bOwner || aOwner === bOwner) continue;
 
-      const room = rooms[id];
-      if (!room || room.closed) continue;
-
       const players = room.players;
       const attacker = players.find(p => p.id === aOwner);
       const target = players.find(p => p.id === bOwner);
       if (!attacker || !target || !target.stickman) continue;
 
-      const hitBody = [bodyA.label, bodyB.label];
-      const isHit =
-        hitBody.includes("handL") ||
-        hitBody.includes("handR") ||
-        hitBody.includes("footL") ||
-        hitBody.includes("footR") ||
-        hitBody.includes("legL") ||
-        hitBody.includes("legR");
-
-      const isHead = hitBody.includes("head");
+      const parts = [bodyA.label, bodyB.label];
+      const isHit = parts.some(p =>
+        ["handL","handR","footL","footR","legL","legR"].includes(p)
+      );
+      const isHead = parts.includes("head");
 
       if (isHit && isHead) {
         const impact =
           (Matter.Vector.magnitude(bodyA.velocity) +
-            Matter.Vector.magnitude(bodyB.velocity)) /
-          2;
+           Matter.Vector.magnitude(bodyB.velocity)) / 2;
+
         const dmg = Math.min(impact * 12, 20);
         if (dmg > 1) {
           target.stickman.hp = Math.max(target.stickman.hp - dmg, 0);
@@ -68,38 +61,33 @@ function createRoom() {
   return id;
 }
 
-// === Trouver une room disponible (NE RÉUTILISE JAMAIS UNE ROOM FERMÉE) ===
+// === Room finder corrigé (jamais de room fermée) ===
 function findAvailableRoom() {
   for (const id in rooms) {
     const r = rooms[id];
-
-    if (r.closed) continue;            // ⛔ Skip rooms fermées définitivement
+    if (r.closed) continue; // ⛔ Room terminée = inutilisable
     if (r.players.length < 2) return id;
   }
-
-  return createRoom(); // 🔥 Aucune room valide → nouvelle room propre
+  return createRoom(); // 🔥 nouvelle room propre
 }
 
-// === Création du stickman ===
+// === Stickman ===
 function createStickman(x, y, color, world, ownerId) {
-  const add = (body) => {
-    body.plugin = { ownerId };
-    return body;
-  };
+  const tag = (b) => { b.plugin = { ownerId }; return b; };
 
-  const head = add(Matter.Bodies.circle(x, y, 10, { restitution: 0.4, label: "head" }));
-  const chest = add(Matter.Bodies.rectangle(x, y + 30, 15, 25, { label: "chest" }));
-  const pelvis = add(Matter.Bodies.rectangle(x, y + 60, 15, 20, { label: "pelvis" }));
+  const head = tag(Matter.Bodies.circle(x, y, 10, { restitution: 0.4, label: "head" }));
+  const chest = tag(Matter.Bodies.rectangle(x, y + 30, 15, 25, { label: "chest" }));
+  const pelvis = tag(Matter.Bodies.rectangle(x, y + 60, 15, 20, { label: "pelvis" }));
 
-  const armL = add(Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { label: "armL" }));
-  const handL = add(Matter.Bodies.circle(x - 40, y + 30, 4, { label: "handL" }));
-  const armR = add(Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { label: "armR" }));
-  const handR = add(Matter.Bodies.circle(x + 40, y + 30, 4, { label: "handR" }));
+  const armL = tag(Matter.Bodies.rectangle(x - 20, y + 30, 20, 5, { label: "armL" }));
+  const handL = tag(Matter.Bodies.circle(x - 40, y + 30, 4, { label: "handL" }));
+  const armR = tag(Matter.Bodies.rectangle(x + 20, y + 30, 20, 5, { label: "armR" }));
+  const handR = tag(Matter.Bodies.circle(x + 40, y + 30, 4, { label: "handR" }));
 
-  const legL = add(Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { label: "legL" }));
-  const footL = add(Matter.Bodies.circle(x - 10, y + 100, 5, { label: "footL" }));
-  const legR = add(Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { label: "legR" }));
-  const footR = add(Matter.Bodies.circle(x + 10, y + 100, 5, { label: "footR" }));
+  const legL = tag(Matter.Bodies.rectangle(x - 10, y + 80, 5, 25, { label: "legL" }));
+  const footL = tag(Matter.Bodies.circle(x - 10, y + 100, 5, { label: "footL" }));
+  const legR = tag(Matter.Bodies.rectangle(x + 10, y + 80, 5, 25, { label: "legR" }));
+  const footR = tag(Matter.Bodies.circle(x + 10, y + 100, 5, { label: "footR" }));
 
   const parts = [head, chest, pelvis, armL, handL, armR, handR, legL, legR, footL, footR];
   Matter.World.add(world, parts);
@@ -128,17 +116,16 @@ function createStickman(x, y, color, world, ownerId) {
 }
 
 function serializeStickman(s) {
-  const b = s.bodies;
   return {
     color: s.color,
     hp: s.hp,
     parts: Object.fromEntries(
-      Object.entries(b).map(([k, v]) => [k, v.position])
+      Object.entries(s.bodies).map(([k, v]) => [k, v.position])
     ),
   };
 }
 
-// === Simulation ===
+// === Simulation physique ===
 setInterval(() => {
   for (const id in rooms) {
     const room = rooms[id];
@@ -169,7 +156,7 @@ wss.on("connection", (ws) => {
   const roomId = findAvailableRoom();
   const room = rooms[roomId];
 
-  // ⛔ Si la room est fermée → on refuse l'accès
+  // ⛔ Par sécurité : refus d'accès aux rooms fermées
   if (!room || room.closed) {
     ws.send(JSON.stringify({ type: "roomClosed" }));
     ws.close();
@@ -201,21 +188,29 @@ wss.on("connection", (ws) => {
 
     if (data.type === "pointerMove") player.pointer = data.pointer;
 
+    // 🔥 Fermeture volontaire : fin du match
     if (data.type === "exitGame") {
-      room.closed = true; // 🚫 Room terminée → plus jamais réutilisée
+      room.closed = true;
+
       for (const pl of room.players)
         if (pl.ws.readyState === 1)
           pl.ws.send(JSON.stringify({ type: "goToMenu" }));
+
+      room.players = [];
     }
   });
 
+  // 🔥 Fermeture automatique si un joueur quitte
   ws.on("close", () => {
-    room.players = room.players.filter(p => p.ws !== ws);
+    if (room.closed) return;
 
-    // Si la room est vide → la fermer définitivement
-    if (room.players.length === 0) {
-      room.closed = true;
-    }
+    room.closed = true;
+
+    for (const pl of room.players)
+      if (pl.ws.readyState === 1)
+        pl.ws.send(JSON.stringify({ type: "goToMenu" }));
+
+    room.players = [];
   });
 });
 
