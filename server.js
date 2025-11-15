@@ -24,8 +24,9 @@ function createRoom() {
   const room = { id, engine, world, players: [], closed: false };
   rooms[id] = room;
 
+  // === Gestion des collisions ===
   Matter.Events.on(engine, "collisionStart", (event) => {
-    if (room.closed) return;
+    if (room.closed) return; // Room terminée → plus d'interactions
 
     for (const pair of event.pairs) {
       const { bodyA, bodyB } = pair;
@@ -36,11 +37,11 @@ function createRoom() {
       const players = room.players;
       const attacker = players.find(p => p.id === aOwner);
       const target = players.find(p => p.id === bOwner);
-      if (!attacker || !target || !target.stickman) continue;
+      if (!attacker || !target) continue;
 
       const parts = [bodyA.label, bodyB.label];
       const isHit = parts.some(p =>
-        ["handL","handR","footL","footR","legL","legR"].includes(p)
+        ["handL", "handR", "footL", "footR", "legL", "legR"].includes(p)
       );
       const isHead = parts.includes("head");
 
@@ -48,11 +49,9 @@ function createRoom() {
         const impact =
           (Matter.Vector.magnitude(bodyA.velocity) +
            Matter.Vector.magnitude(bodyB.velocity)) / 2;
-
         const dmg = Math.min(impact * 12, 20);
         if (dmg > 1) {
           target.stickman.hp = Math.max(target.stickman.hp - dmg, 0);
-          console.log(`💥 ${attacker.id} frappe ${target.id} (-${dmg.toFixed(1)} HP)`);
         }
       }
     }
@@ -61,14 +60,14 @@ function createRoom() {
   return id;
 }
 
-// === Room finder corrigé (jamais de room fermée) ===
+// === Room finder corrigé (ignore les rooms fermées) ===
 function findAvailableRoom() {
   for (const id in rooms) {
     const r = rooms[id];
-    if (r.closed) continue; // ⛔ Room terminée = inutilisable
+    if (r.closed) continue;      // ⛔ Room terminée → ignorée
     if (r.players.length < 2) return id;
   }
-  return createRoom(); // 🔥 nouvelle room propre
+  return createRoom();           // 🔥 Nouvelle room propre
 }
 
 // === Stickman ===
@@ -129,7 +128,7 @@ function serializeStickman(s) {
 setInterval(() => {
   for (const id in rooms) {
     const room = rooms[id];
-    if (room.closed) continue;
+    if (room.closed) continue; // Room fermée → simulation stoppée
 
     Matter.Engine.update(room.engine, 1000 / 60);
 
@@ -143,11 +142,14 @@ setInterval(() => {
     }
 
     const state = {};
-    for (const p of room.players) state[p.id] = serializeStickman(p.stickman);
+    for (const p of room.players)
+      state[p.id] = serializeStickman(p.stickman);
 
     const payload = JSON.stringify({ type: "state", players: state });
+
     for (const p of room.players)
-      if (p.ws.readyState === 1) p.ws.send(payload);
+      if (p.ws.readyState === 1)
+        p.ws.send(payload);
   }
 }, 1000 / 30);
 
@@ -156,7 +158,6 @@ wss.on("connection", (ws) => {
   const roomId = findAvailableRoom();
   const room = rooms[roomId];
 
-  // ⛔ Par sécurité : refus d'accès aux rooms fermées
   if (!room || room.closed) {
     ws.send(JSON.stringify({ type: "roomClosed" }));
     ws.close();
@@ -178,7 +179,6 @@ wss.on("connection", (ws) => {
   room.players.push(player);
   ws.roomId = roomId;
 
-  console.log(`👤 Joueur ${id} connecté (${color}) dans ${roomId}`);
   ws.send(JSON.stringify({ type: "init", id, color }));
 
   ws.on("message", (msg) => {
@@ -186,31 +186,20 @@ wss.on("connection", (ws) => {
     const player = room.players.find(p => p.ws === ws);
     if (!player) return;
 
-    if (data.type === "pointerMove") player.pointer = data.pointer;
+    if (data.type === "pointerMove")
+      player.pointer = data.pointer;
 
-    // 🔥 Fermeture volontaire : fin du match
     if (data.type === "exitGame") {
-      room.closed = true;
-
-      for (const pl of room.players)
-        if (pl.ws.readyState === 1)
-          pl.ws.send(JSON.stringify({ type: "goToMenu" }));
-
-      room.players = [];
+      room.closed = true;   // Room fermée, mais NE KICK PAS L’AUTRE
     }
   });
 
-  // 🔥 Fermeture automatique si un joueur quitte
   ws.on("close", () => {
-    if (room.closed) return;
-
+    // Fermeture définitive de la room
     room.closed = true;
 
-    for (const pl of room.players)
-      if (pl.ws.readyState === 1)
-        pl.ws.send(JSON.stringify({ type: "goToMenu" }));
-
-    room.players = [];
+    // ❗ On ne kick PAS le joueur restant
+    // ❗ On ne vide PAS room.players
   });
 });
 
